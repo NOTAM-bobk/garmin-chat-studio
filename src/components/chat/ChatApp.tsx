@@ -38,6 +38,16 @@ export function ChatApp() {
   const [error, setError] = useState<string | null>(null);
   const [sidebar, setSidebar] = useState(false);
   const [desktopSidebar, setDesktopSidebar] = useState(true);
+  const [garmin, setGarmin] = useState(false);
+  useEffect(() => {
+    setGarmin(localStorage.getItem("garmin-chat:connected") === "1");
+  }, []);
+  const toggleGarmin = () => {
+    const next = !garmin;
+    setGarmin(next);
+    if (next) localStorage.setItem("garmin-chat:connected", "1");
+    else localStorage.removeItem("garmin-chat:connected");
+  };
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -226,7 +236,17 @@ export function ChatApp() {
 
         {!active ? (
           <div className="flex flex-1 flex-col items-center justify-center px-4 pb-16">
-            <h1 className="mb-8 text-center text-[28px] font-medium tracking-tight">What can I help with?</h1>
+            <h1 className="mb-4 text-center text-[28px] font-medium tracking-tight">Ask me about your data</h1>
+            <button
+              onClick={toggleGarmin}
+              className={
+                garmin
+                  ? "mb-8 rounded-full border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  : "mb-8 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+              }
+            >
+              {garmin ? "Disconnect Garmin" : "Connect Garmin"}
+            </button>
             <div className="w-full max-w-3xl">{composer}</div>
             <div className="mt-4 flex max-w-3xl flex-wrap justify-center gap-2">
               {SUGGESTIONS.map((s) => (

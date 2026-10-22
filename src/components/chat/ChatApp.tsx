@@ -105,7 +105,8 @@ export function ChatApp() {
             if (c.id !== chatId) return c;
             const msgs = [...c.messages];
             const last = msgs[msgs.length - 1];
-            msgs[msgs.length - 1] = { ...last, content: last.content + t };
+            if (!last) return c;
+            msgs[msgs.length - 1] = { role: last.role, content: last.content + t };
             return { ...c, messages: msgs };
           }),
         );
@@ -114,7 +115,7 @@ export function ChatApp() {
       const msg = e instanceof Error ? e.message : (e as { error?: { message?: string } })?.error?.message;
       setError(msg || "Something went wrong. Please try again.");
       setChats((p) =>
-        p.map((c) => (c.id === chatId && !c.messages[c.messages.length - 1].content ? { ...c, messages: c.messages.slice(0, -1) } : c)),
+        p.map((c) => (c.id === chatId && !c.messages[c.messages.length - 1]?.content ? { ...c, messages: c.messages.slice(0, -1) } : c)),
       );
     } finally {
       setBusy(false);

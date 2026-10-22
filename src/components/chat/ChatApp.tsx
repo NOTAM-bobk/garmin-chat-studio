@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
@@ -6,14 +6,16 @@ import remarkGfm from "remark-gfm";
 import {
   Activity,
   ArrowUp,
+  ArrowUpRight,
   Check,
   ChevronDown,
+  CircleHelp,
   Copy,
   Dumbbell,
+  Heart,
   Loader2,
-  Menu,
   Moon,
-  PanelLeft,
+  PenLine,
   Plug,
   RotateCcw,
   SlidersHorizontal,
@@ -30,6 +32,7 @@ import { toast } from "sonner";
 
 import { Thinking, ToolActivity } from "@/components/chat/AgentTrace";
 import { ChatChart } from "@/components/chat/ChatChart";
+import { OnboardingDialog } from "@/components/chat/OnboardingDialog";
 import { Toaster } from "@/components/ui/sonner";
 import { parseChartSpec } from "@/lib/chart";
 import {
@@ -52,8 +55,10 @@ import {
 } from "@/lib/models";
 import { cn } from "@/lib/utils";
 import { listPuterModels, loadPuter, runRound, type AgentMessage } from "@/lib/puter";
+import { useSteadyReveal } from "@/lib/useSteadyReveal";
 
 const TONE_KEY = "garmin-chat:tone";
+const ONBOARDED_KEY = "garmin-chat:onboarded:v1";
 const FENCE = "```";
 
 const SUGGESTIONS = [
@@ -151,6 +156,7 @@ export function ChatApp() {
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [hydrated, setHydrated] = useState(false);
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
 
   const [status, setStatus] = useState<GarminStatus | null>(null);
   const [garminTools, setGarminTools] = useState<GarminTool[]>([]);
@@ -174,6 +180,11 @@ export function ChatApp() {
     const savedTone = localStorage.getItem(TONE_KEY);
     if (savedTone && TONES.some((option) => option.id === savedTone)) {
       setTone(savedTone as ToneId);
+    }
+    try {
+      if (localStorage.getItem(ONBOARDED_KEY) !== "1") setWelcomeOpen(true);
+    } catch {
+      // Storage blocked: skip the one-time welcome rather than looping it.
     }
     loadPuter().catch(() => undefined);
   }, []);
@@ -319,6 +330,15 @@ export function ChatApp() {
       // Private mode: the tone still applies for this session.
     }
   }
+
+  const closeWelcome = useCallback(() => {
+    setWelcomeOpen(false);
+    try {
+      localStorage.setItem(ONBOARDED_KEY, "1");
+    } catch {
+      // Ignore storage failures; the dialog just closes for this session.
+    }
+  }, []);
 
   function connectGarmin() {
     if (status && !status.configured) {
@@ -647,6 +667,35 @@ export function ChatApp() {
     await runTurn({ chatId, assistantId, prior });
   }
 
+  async function editMessage(chatId: string, messageId: string, text: string) {
+    const next = text.trim();
+    if (!next || busy) return;
+    const chat = chats.find((entry) => entry.id === chatId);
+    if (!chat) return;
+    const index = chat.messages.findIndex((message) => message.id === messageId);
+    const target = chat.messages[index];
+    if (!target || target.role !== "user") return;
+
+    const edited: Message = { ...target, content: next };
+    const prior = [...chat.messages.slice(0, index), edited];
+    const assistantId = uid();
+    setError(null);
+    stickRef.current = true;
+    setChats((previous) =>
+      previous.map((entry) =>
+        entry.id === chatId
+          ? {
+              ...entry,
+              updated: Date.now(),
+              messages: [...prior, { id: assistantId, role: "assistant", content: "", steps: [] }],
+            }
+          : entry,
+      ),
+    );
+
+    await runTurn({ chatId, assistantId, prior });
+  }
+
   function setFeedback(chatId: string, messageId: string, value: "up" | "down") {
     setChats((previous) =>
       previous.map((chat) =>
@@ -761,6 +810,18 @@ export function ChatApp() {
     <div className="flex h-dvh overflow-hidden bg-background text-foreground">
       <Toaster position="top-center" />
 
+      <OnboardingDialog
+        open={welcomeOpen}
+        onOpenChange={(next) => (next ? setWelcomeOpen(true) : closeWelcome())}
+        connected={connected}
+        configured={status?.configured ?? true}
+        tools={toolsAvailable}
+        onConnect={() => {
+          closeWelcome();
+          connectGarmin();
+        }}
+      />
+
       {mobileSidebar && (
         <div
           className="fixed inset-0 z-30 bg-foreground/25 md:hidden"
@@ -776,16 +837,15 @@ export function ChatApp() {
         )}
       >
         <div className="flex items-center justify-between px-2 py-2">
-          <button
+          <NavToggle
+            open
+            label="Close sidebar"
             onClick={() => {
               setMobileSidebar(false);
               setSidebarOpen(false);
             }}
-            aria-label="Close sidebar"
-            className="grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
-          >
-            <PanelLeft className="size-[18px]" />
-          </button>
+            className="hover:bg-sidebar-accent"
+          />
           <button
             onClick={newChat}
             aria-label="New chat"
@@ -856,28 +916,46 @@ export function ChatApp() {
               Connect Garmin
             </button>
           )}
+
+          <div className="mt-1 space-y-0.5 border-t border-sidebar-border/60 pt-1">
+            <button
+              onClick={() => setWelcomeOpen(true)}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <CircleHelp className="size-3.5" />
+              How it works
+            </button>
+            <a
+              href="https://fundrazr.com/62nDBa"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <Heart className="size-3.5 text-rose-500 transition-transform duration-200 group-hover:scale-110" />
+              Donate
+              <ArrowUpRight className="ml-auto size-3 opacity-60" />
+            </a>
+          </div>
         </div>
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-1 px-2 sm:px-3">
-          <button
+          <NavToggle
+            open={mobileSidebar}
+            label="Open sidebar"
             onClick={() => setMobileSidebar(true)}
-            aria-label="Open sidebar"
-            className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-accent md:hidden"
-          >
-            <Menu className="size-5" />
-          </button>
+            className="md:hidden"
+          />
 
           {!sidebarOpen && (
             <>
-              <button
+              <NavToggle
+                open={false}
+                label="Open sidebar"
                 onClick={() => setSidebarOpen(true)}
-                aria-label="Open sidebar"
-                className="hidden size-9 place-items-center rounded-lg text-muted-foreground hover:bg-accent md:grid"
-              >
-                <PanelLeft className="size-5" />
-              </button>
+                className="hidden md:grid"
+              />
               <button
                 onClick={newChat}
                 aria-label="New chat"
@@ -966,7 +1044,7 @@ export function ChatApp() {
                 <button
                   key={suggestion.title}
                   onClick={() => void send(suggestion.prompt)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-[13px] text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:bg-accent hover:text-foreground hover:shadow-sm"
                 >
                   <suggestion.icon className="size-3.5" strokeWidth={1.9} />
                   {suggestion.title}
@@ -1010,6 +1088,8 @@ export function ChatApp() {
                       index === activeChat.messages.length - 1 &&
                       activeChat.messages[index - 1]?.role === "user"
                     }
+                    canEdit={!busy}
+                    onEdit={(text) => void editMessage(activeChat.id, message.id, text)}
                     onRegenerate={() => void regenerate(activeChat.id, message.id)}
                     onFeedback={(value) => setFeedback(activeChat.id, message.id, value)}
                   />
@@ -1089,38 +1169,121 @@ function MessageBubble({
   message,
   running,
   canRegenerate,
+  canEdit,
+  onEdit,
   onRegenerate,
   onFeedback,
 }: {
   message: Message;
   running: boolean;
   canRegenerate: boolean;
+  canEdit: boolean;
+  onEdit: (text: string) => void;
   onRegenerate: () => void;
   onFeedback: (value: "up" | "down") => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(message.content);
+  const revealed = useSteadyReveal(message.content, running);
+  const revealing = running && revealed.length < message.content.length;
   const markdown = useMemo(
     () => (
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-        {message.content}
+        {revealed}
       </ReactMarkdown>
     ),
-    [message.content],
+    [revealed],
   );
 
   if (message.role === "user") {
+    if (editing) {
+      return (
+        <div className="animate-in fade-in-0 flex flex-col items-end duration-200">
+          <div className="w-full max-w-[92%] sm:max-w-[85%]">
+            <textarea
+              autoFocus
+              value={draft}
+              rows={3}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  setEditing(false);
+                  setDraft(message.content);
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  if (!draft.trim()) return;
+                  setEditing(false);
+                  onEdit(draft);
+                }
+              }}
+              aria-label="Edit your prompt"
+              className="w-full resize-none rounded-2xl border border-border bg-card px-3.5 py-2.5 text-[15px] leading-relaxed outline-none transition-colors focus:border-foreground/25"
+            />
+            <div className="mt-1.5 flex items-center justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditing(false);
+                  setDraft(message.content);
+                }}
+                className="rounded-lg px-2.5 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!draft.trim()}
+                onClick={() => {
+                  setEditing(false);
+                  onEdit(draft);
+                }}
+                className="rounded-lg bg-primary px-3 py-1 text-[12px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                Save & redo
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-3xl bg-secondary px-4 py-2.5 text-[15px] leading-relaxed">
-          {message.content}
+      <div className="group animate-in fade-in-0 slide-in-from-bottom-1 flex justify-end duration-200">
+        <div className="flex max-w-[92%] items-end gap-1 sm:max-w-[85%]">
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(message.content);
+                setEditing(true);
+              }}
+              aria-label="Edit your prompt"
+              title="Edit prompt"
+              className="mb-1 grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-100 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+            >
+              <PenLine className="size-3.5" />
+            </button>
+          )}
+          <div className="whitespace-pre-wrap rounded-3xl bg-secondary px-4 py-2.5 text-[15px] leading-relaxed">
+            {message.content}
+          </div>
         </div>
       </div>
     );
   }
 
-  const empty = !message.content && message.steps.length === 0 && !message.error;
+  const empty = !revealed && message.steps.length === 0 && !message.error;
 
-  const actions = [
+  const actions: {
+    key: string;
+    label: string;
+    icon: ReactNode;
+    onClick: () => void;
+    active: boolean;
+    wide?: boolean;
+  }[] = [
     {
       key: "copy",
       label: copied ? "Copied" : "Copy answer",
@@ -1140,10 +1303,11 @@ function MessageBubble({
       ? [
           {
             key: "regenerate",
-            label: "Regenerate answer",
+            label: "Redo answer",
             icon: <RotateCcw className="size-3.5" />,
             onClick: onRegenerate,
             active: false,
+            wide: true,
           },
         ]
       : []),
@@ -1164,7 +1328,7 @@ function MessageBubble({
   ];
 
   return (
-    <div className="group">
+    <div className="group animate-in fade-in-0 duration-300">
       <Thinking steps={message.steps} running={running} />
       <ToolActivity steps={message.steps} />
 
@@ -1176,7 +1340,15 @@ function MessageBubble({
         </div>
       )}
 
-      {message.content && <div className="prose-chat">{markdown}</div>}
+      {revealed && (
+        <div
+          className={cn("prose-chat reveal-text", revealing && "is-revealing")}
+          aria-busy={revealing || undefined}
+        >
+          {markdown}
+          {revealing && <span className="reveal-caret" aria-hidden="true" />}
+        </div>
+      )}
 
       {message.error && (
         <div className="mt-2 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-[12.5px] text-destructive">
@@ -1186,7 +1358,7 @@ function MessageBubble({
       )}
 
       {!running && (
-        <div className="mt-1.5 flex items-center gap-0.5 text-muted-foreground transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+        <div className="mt-1.5 flex items-center gap-0.5 text-muted-foreground">
           {actions.map((action) => (
             <button
               key={action.key}
@@ -1195,15 +1367,59 @@ function MessageBubble({
               aria-pressed={action.active || undefined}
               title={action.label}
               className={cn(
-                "grid size-7 place-items-center rounded-md transition-colors hover:bg-accent hover:text-foreground",
+                "inline-flex h-7 items-center gap-1 rounded-md transition-colors hover:bg-accent hover:text-foreground active:scale-[0.97]",
+                action.wide ? "px-1.5 text-[11.5px]" : "w-7 justify-center",
                 action.active && "text-foreground",
               )}
             >
               {action.icon}
+              {action.wide && <span>Redo</span>}
             </button>
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+/** Two unequal lines that morph into an X — the sidebar trigger. */
+function NavToggle({
+  open,
+  label,
+  onClick,
+  className,
+}: {
+  open: boolean;
+  label: string;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-expanded={open}
+      title={label}
+      className={cn(
+        "group grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:scale-[0.97]",
+        className,
+      )}
+    >
+      <span className="relative block h-3 w-[18px]">
+        <span
+          className={cn(
+            "absolute left-0 top-0 h-[1.6px] rounded-full bg-current transition-all duration-300 ease-out",
+            open ? "w-[18px] translate-y-[4.6px] rotate-45" : "w-[18px]",
+          )}
+        />
+        <span
+          className={cn(
+            "absolute left-0 top-[9px] h-[1.6px] rounded-full bg-current transition-all duration-300 ease-out",
+            open ? "w-[18px] -translate-y-[4.6px] -rotate-45" : "w-[11px] group-hover:w-[15px]",
+          )}
+        />
+      </span>
+    </button>
   );
 }

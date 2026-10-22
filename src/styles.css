@@ -188,6 +188,26 @@
     color: color-mix(in oklab, var(--color-muted-foreground) 80%, transparent);
   }
 
+  /* Streamed answers: steady reveal, briefly blue while text is landing. */
+  .reveal-text {
+    transition: color 600ms ease-out;
+  }
+
+  .reveal-text.is-revealing {
+    color: color-mix(in oklab, var(--color-brand) 42%, var(--color-foreground));
+  }
+
+  .reveal-caret {
+    display: inline-block;
+    width: 2px;
+    height: 1.05em;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    border-radius: 999px;
+    background: var(--color-brand);
+    animation: caret-blink 1s steps(2, start) infinite;
+  }
+
   .prose-chat {
     font-size: 0.945rem;
     line-height: 1.72;
@@ -288,6 +308,16 @@
     border-left: 2px solid var(--color-brand);
     padding-left: 0.9em;
     color: var(--color-muted-foreground);
+  }
+}
+
+@keyframes caret-blink {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 1;
   }
 }
 

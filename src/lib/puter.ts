@@ -142,6 +142,67 @@ function stringField(value: unknown): string {
   return "";
 }
 
+/** Plain text out of a non-streamed Puter response, whatever shape it arrives in. */
+function responseText(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (!raw || typeof raw !== "object") return "";
+  const record = raw as Record<string, unknown>;
+  const message = record["message"];
+  if (typeof message === "string") return message;
+  if (message && typeof message === "object") {
+    return stringField((message as Record<string, unknown>)["content"]);
+  }
+  return stringField(record["text"]);
+}
+
+/** Tidy a model-written title: one line, no quotes or trailing punctuation, capped. */
+export function cleanTitle(raw: string): string {
+  const line = raw
+    .split(/\r?\n/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" ");
+  const stripped = line
+    .replace(/^["'“”‘’`*#\s]+/, "")
+    .replace(/["'“”‘’`*\s]+$/, "")
+    .replace(/[.!?,;:—-]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped.slice(0, 52).trim();
+}
+
+/**
+ * Ask the model for a short thread title. Runs on the same Puter session as the
+ * chat; failures are the caller's problem (auto-naming stays silent).
+ */
+export async function nameChat(
+  messages: { role: string; content: string }[],
+  model: string,
+): Promise<string> {
+  const transcript = messages
+    .slice(0, 4)
+    .map((message) => `${message.role}: ${message.content.slice(0, 500)}`)
+    .join("\n\n");
+  if (!transcript.trim()) return "";
+
+  const puter = await loadPuter();
+  await ensureGuest(puter);
+
+  const raw = await puter.ai.chat(
+    [
+      {
+        role: "system",
+        content:
+          "You name chat threads. Reply with the title only: 2-5 words, no quotes, no trailing punctuation, at most 48 characters. Name the topic (what the chat is about), not the fact that it is a chat.",
+      },
+      { role: "user", content: transcript },
+    ],
+    { model, stream: false },
+  );
+
+  return cleanTitle(responseText(raw));
+}
+
 /** One model round, streamed. Tool calls are collected and reported as events. */
 export async function runRound(
   messages: AgentMessage[],

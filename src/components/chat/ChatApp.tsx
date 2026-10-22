@@ -15,11 +15,14 @@ import {
   Heart,
   Loader2,
   Moon,
+  MoreHorizontal,
   PenLine,
   Plug,
   RotateCcw,
+  Settings2,
   SlidersHorizontal,
   Square,
+  Sparkles,
   SquarePen,
   ThumbsDown,
   ThumbsUp,
@@ -33,6 +36,15 @@ import { toast } from "sonner";
 import { Thinking, ToolActivity } from "@/components/chat/AgentTrace";
 import { ChatChart } from "@/components/chat/ChatChart";
 import { OnboardingDialog } from "@/components/chat/OnboardingDialog";
+import { RenameDialog } from "@/components/chat/RenameDialog";
+import { SettingsDialog } from "@/components/chat/SettingsDialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Toaster } from "@/components/ui/sonner";
 import { parseChartSpec } from "@/lib/chart";
 import {
@@ -53,11 +65,13 @@ import {
   type ModelOption,
   type ToneId,
 } from "@/lib/models";
+import { haptic, readHapticsSetting, writeHapticsSetting } from "@/lib/haptics";
 import { cn } from "@/lib/utils";
-import { listPuterModels, loadPuter, runRound, type AgentMessage } from "@/lib/puter";
+import { listPuterModels, loadPuter, nameChat, runRound, type AgentMessage } from "@/lib/puter";
 import { useSteadyReveal } from "@/lib/useSteadyReveal";
 
 const TONE_KEY = "garmin-chat:tone";
+const MODEL_KEY = "garmin-chat:model";
 const ONBOARDED_KEY = "garmin-chat:onboarded:v1";
 const FENCE = "```";
 
@@ -157,6 +171,9 @@ export function ChatApp() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [hydrated, setHydrated] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [haptics, setHaptics] = useState(true);
+  const [renamingChat, setRenamingChat] = useState<Chat | null>(null);
 
   const [status, setStatus] = useState<GarminStatus | null>(null);
   const [garminTools, setGarminTools] = useState<GarminTool[]>([]);
@@ -181,6 +198,9 @@ export function ChatApp() {
     if (savedTone && TONES.some((option) => option.id === savedTone)) {
       setTone(savedTone as ToneId);
     }
+    const savedModel = localStorage.getItem(MODEL_KEY);
+    if (savedModel) setModel(savedModel);
+    setHaptics(readHapticsSetting());
     try {
       if (localStorage.getItem(ONBOARDED_KEY) !== "1") setWelcomeOpen(true);
     } catch {
@@ -192,6 +212,15 @@ export function ChatApp() {
   useEffect(() => {
     if (hydrated) saveChats(chats);
   }, [chats, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      localStorage.setItem(MODEL_KEY, model);
+    } catch {
+      // Private mode: the pick still applies for this session.
+    }
+  }, [model, hydrated]);
 
   // Pull Puter's live catalogue so the picker grows with what the SDK offers.
   useEffect(() => {
@@ -298,6 +327,7 @@ export function ChatApp() {
   }
 
   const newChat = useCallback(() => {
+    haptic("tap");
     abortRef.current?.abort();
     setActiveId(null);
     setMobileSidebar(false);
@@ -318,8 +348,54 @@ export function ChatApp() {
   }, [newChat]);
 
   function deleteChat(id: string) {
+    haptic("warn");
     setChats((previous) => previous.filter((chat) => chat.id !== id));
     if (activeId === id) setActiveId(null);
+    if (renamingChat?.id === id) setRenamingChat(null);
+  }
+
+  function clearChats() {
+    haptic("warn");
+    abortRef.current?.abort();
+    setChats([]);
+    setActiveId(null);
+    setError(null);
+    toast("All chats deleted", { description: "Saved threads are gone from this browser." });
+  }
+
+  function startRename(chat: Chat) {
+    haptic("tap");
+    setRenamingChat(chat);
+  }
+
+  function commitRename(title: string) {
+    const id = renamingChat?.id;
+    setRenamingChat(null);
+    if (!id) return;
+    haptic("done");
+    setChats((previous) => previous.map((chat) => (chat.id === id ? { ...chat, title } : chat)));
+  }
+
+  /** Let the model write a short thread title from the conversation so far. */
+  async function titleChat(chat: Pick<Chat, "id" | "messages">, notify: boolean) {
+    const seed = chat.messages
+      .filter((message) => message.content.trim())
+      .map((message) => ({ role: message.role, content: message.content }));
+    if (seed.length === 0) return;
+    try {
+      const title = await nameChat(seed, model);
+      if (!title) throw new Error("No title returned");
+      setChats((previous) =>
+        previous.map((entry) => (entry.id === chat.id ? { ...entry, title } : entry)),
+      );
+      if (notify) toast("Chat renamed", { description: title });
+    } catch {
+      if (notify) {
+        toast.error("Couldn't name this chat", {
+          description: "The model didn't reply with a title. Try again.",
+        });
+      }
+    }
   }
 
   function chooseTone(next: ToneId) {
@@ -329,6 +405,11 @@ export function ChatApp() {
     } catch {
       // Private mode: the tone still applies for this session.
     }
+  }
+
+  function chooseHaptics(next: boolean) {
+    setHaptics(next);
+    writeHapticsSetting(next);
   }
 
   const closeWelcome = useCallback(() => {
@@ -341,6 +422,7 @@ export function ChatApp() {
   }, []);
 
   function connectGarmin() {
+    haptic("tap");
     if (status && !status.configured) {
       toast.error("Garmin isn't configured", {
         description: "Add SESSION_SECRET to this deployment's environment variables.",
@@ -351,6 +433,7 @@ export function ChatApp() {
   }
 
   async function disconnectGarmin() {
+    haptic("warn");
     try {
       await fetch("/api/garmin/disconnect", { method: "POST" });
     } catch {
@@ -394,8 +477,9 @@ export function ChatApp() {
     assistantId: string;
     /** History up to and including the user message being answered. */
     prior: Message[];
-  }) {
+  }): Promise<string> {
     const { chatId, assistantId, prior } = args;
+    let streamed = "";
 
     const patchMessage = (patch: (message: Message) => Message) => {
       setChats((previous) =>
@@ -425,6 +509,7 @@ export function ChatApp() {
     };
 
     const appendText = (delta: string) => {
+      streamed += delta;
       patchMessage((message) => ({ ...message, content: message.content + delta }));
     };
 
@@ -594,12 +679,15 @@ export function ChatApp() {
       setBusy(false);
       abortRef.current = null;
     }
+
+    return streamed;
   }
 
   async function send(raw: string) {
     const text = raw.trim();
     if (!text || busy) return;
 
+    haptic("tap");
     setError(null);
     setInput("");
     stickRef.current = true;
@@ -637,7 +725,15 @@ export function ChatApp() {
       setActiveId(chatId);
     }
 
-    await runTurn({ chatId, assistantId, prior });
+    const reply = await runTurn({ chatId, assistantId, prior });
+
+    // The first answer names the thread, so the sidebar reads like topics.
+    if (!activeChat) {
+      void titleChat(
+        { id: chatId, messages: [...prior, { ...assistantMessage, content: reply }] },
+        false,
+      );
+    }
   }
 
   async function regenerate(chatId: string, messageId: string) {
@@ -725,7 +821,10 @@ export function ChatApp() {
   const sendButton = busy ? (
     <button
       type="button"
-      onClick={() => abortRef.current?.abort()}
+      onClick={() => {
+        haptic("tap");
+        abortRef.current?.abort();
+      }}
       aria-label="Stop generating"
       className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95"
     >
@@ -789,7 +888,10 @@ export function ChatApp() {
           <ChevronDown className="size-3" />
           <select
             value={tone}
-            onChange={(event) => chooseTone(event.target.value as ToneId)}
+            onChange={(event) => {
+              haptic("select");
+              chooseTone(event.target.value as ToneId);
+            }}
             aria-label="Answer tone"
             className="absolute inset-0 cursor-pointer opacity-0"
           >
@@ -820,6 +922,40 @@ export function ChatApp() {
           closeWelcome();
           connectGarmin();
         }}
+      />
+
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        models={models}
+        model={model}
+        onModelChange={setModel}
+        tone={tone}
+        onToneChange={(next) => {
+          chooseTone(next);
+        }}
+        connected={connected}
+        configured={status?.configured ?? true}
+        tools={toolsAvailable}
+        onConnect={() => {
+          setSettingsOpen(false);
+          connectGarmin();
+        }}
+        onDisconnect={() => void disconnectGarmin()}
+        haptics={haptics}
+        onHapticsChange={chooseHaptics}
+        onHapticTest={haptic}
+        chatCount={chats.length}
+        onClearChats={clearChats}
+      />
+
+      <RenameDialog
+        open={!!renamingChat}
+        initialTitle={renamingChat?.title ?? ""}
+        onOpenChange={(next) => {
+          if (!next) setRenamingChat(null);
+        }}
+        onSave={commitRename}
       />
 
       {mobileSidebar && (
@@ -873,6 +1009,7 @@ export function ChatApp() {
                 >
                   <button
                     onClick={() => {
+                      haptic("tap");
                       setActiveId(chat.id);
                       setMobileSidebar(false);
                     }}
@@ -880,13 +1017,34 @@ export function ChatApp() {
                   >
                     {chat.title || "New chat"}
                   </button>
-                  <button
-                    onClick={() => deleteChat(chat.id)}
-                    aria-label={`Delete ${chat.title}`}
-                    className="mr-1 grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        aria-label={`Actions for ${chat.title}`}
+                        className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-100 transition-opacity hover:bg-sidebar-border/50 hover:text-foreground focus-visible:opacity-100 data-[state=open]:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                      >
+                        <MoreHorizontal className="size-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" sideOffset={4} className="w-44">
+                      <DropdownMenuItem onSelect={() => startRename(chat)}>
+                        <PenLine />
+                        Rename
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => void titleChat(chat, true)}>
+                        <Sparkles />
+                        Name with AI
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={() => deleteChat(chat.id)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 />
+                        Delete chat
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               ))}
             </>
@@ -918,6 +1076,17 @@ export function ChatApp() {
           )}
 
           <div className="mt-1 space-y-0.5 border-t border-sidebar-border/60 pt-1">
+            <button
+              onClick={() => {
+                haptic("tap");
+                setSettingsOpen(true);
+                setMobileSidebar(false);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <Settings2 className="size-3.5" />
+              Settings
+            </button>
             <button
               onClick={() => setWelcomeOpen(true)}
               className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
@@ -966,18 +1135,21 @@ export function ChatApp() {
             </>
           )}
 
-          <label className="relative ml-1 flex min-w-0 cursor-pointer items-center gap-1 rounded-lg px-2 py-1.5 transition-colors hover:bg-accent">
-            <span className="truncate text-[14.5px] font-medium">Garmin Chat</span>
-            <span className="hidden truncate text-[14.5px] text-muted-foreground sm:inline">
-              {modelLabel}
-            </span>
+          <label className="relative ml-1 flex min-w-0 max-w-[62%] cursor-pointer items-center gap-1 rounded-lg px-2 py-1.5 transition-colors hover:bg-accent">
+            <span className="truncate text-[14.5px] font-medium">{modelLabel}</span>
             <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
             <select
               value={model}
-              onChange={(event) => setModel(event.target.value)}
+              onChange={(event) => {
+                haptic("select");
+                setModel(event.target.value);
+              }}
               aria-label="Model"
               className="absolute inset-0 cursor-pointer opacity-0"
             >
+              {!models.some((option) => option.id === model) && (
+                <option value={model}>{model}</option>
+              )}
               {models.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.label}
@@ -1289,6 +1461,7 @@ function MessageBubble({
       label: copied ? "Copied" : "Copy answer",
       icon: copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />,
       onClick: () => {
+        haptic("select");
         void navigator.clipboard
           ?.writeText(message.content)
           .then(() => {
@@ -1305,7 +1478,10 @@ function MessageBubble({
             key: "regenerate",
             label: "Redo answer",
             icon: <RotateCcw className="size-3.5" />,
-            onClick: onRegenerate,
+            onClick: () => {
+              haptic("tap");
+              onRegenerate();
+            },
             active: false,
             wide: true,
           },
@@ -1315,14 +1491,20 @@ function MessageBubble({
       key: "up",
       label: "Good answer",
       icon: <ThumbsUp className="size-3.5" />,
-      onClick: () => onFeedback("up"),
+      onClick: () => {
+        haptic("select");
+        onFeedback("up");
+      },
       active: message.feedback === "up",
     },
     {
       key: "down",
       label: "Bad answer",
       icon: <ThumbsDown className="size-3.5" />,
-      onClick: () => onFeedback("down"),
+      onClick: () => {
+        haptic("select");
+        onFeedback("down");
+      },
       active: message.feedback === "down",
     },
   ];

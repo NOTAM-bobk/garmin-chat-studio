@@ -43,6 +43,7 @@ export const Route = createFileRoute("/api/garmin/callback")({
         try {
           const { accessToken, expiresIn } = await exchangeCode({
             code,
+            codeVerifier: pending.verifier,
             redirectUri: pending.redirectUri,
             clientId: pending.clientId,
             clientSecret: pending.clientSecret,

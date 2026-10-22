@@ -245,6 +245,7 @@ type TokenResponse = {
 
 export async function exchangeCode(options: {
   code: string;
+  codeVerifier: string;
   redirectUri: string;
   clientId: string;
   clientSecret: string;
@@ -252,6 +253,9 @@ export async function exchangeCode(options: {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code: options.code,
+    // PKCE S256: the gateway recomputes the challenge from this verifier and
+    // rejects the exchange with invalid_grant if it is missing or mismatched.
+    code_verifier: options.codeVerifier,
     redirect_uri: options.redirectUri,
     client_id: options.clientId,
     client_secret: options.clientSecret,
@@ -265,11 +269,13 @@ export async function exchangeCode(options: {
   const payload = (await response.json().catch(() => ({}))) as TokenResponse;
   if (!response.ok || typeof payload.access_token !== "string") {
     const reason =
-      typeof payload.error_description === "string"
-        ? payload.error_description
-        : typeof payload.error === "string"
-          ? payload.error
-          : `token exchange failed (${response.status})`;
+      payload.error === "invalid_grant"
+        ? "That Garmin sign-in link was already used or expired. Connect again to get a fresh one."
+        : typeof payload.error_description === "string"
+          ? payload.error_description
+          : typeof payload.error === "string"
+            ? payload.error
+            : `token exchange failed (${response.status})`;
     throw new Error(reason);
   }
   return {

@@ -1,313 +1,1086 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  Activity,
   ArrowUp,
-  Copy,
   Check,
-  Menu,
-  PanelLeft,
-  SquarePen,
-  Square,
-  Trash2,
   ChevronDown,
+  Copy,
+  Dumbbell,
+  HeartPulse,
+  Loader2,
+  Menu,
+  Moon,
+  PanelLeft,
+  Plug,
+  RefreshCw,
+  ShieldCheck,
+  Square,
+  SquarePen,
+  Trash2,
+  TriangleAlert,
+  Unplug,
+  Zap,
 } from "lucide-react";
-import { streamChat, loadPuter, type ChatMsg } from "@/lib/puter";
+import { toast } from "sonner";
 
-type Chat = { id: string; title: string; messages: ChatMsg[]; updated: number };
+import { AgentTrace } from "@/components/chat/AgentTrace";
+import { Toaster } from "@/components/ui/sonner";
+import {
+  describeTool,
+  formatBytes,
+  toolSpecs,
+  type GarminStatus,
+  type GarminTool,
+  type ToolResult,
+} from "@/lib/garmin";
+import {
+  loadChats,
+  relativeTime,
+  saveChats,
+  uid,
+  type Chat,
+  type Message,
+  type TraceStep,
+} from "@/lib/chat";
+import { cn } from "@/lib/utils";
+import { loadPuter, runRound, type AgentMessage } from "@/lib/puter";
 
-const MODELS = ["gpt-5.4-nano", "gpt-5-mini", "claude-sonnet-4", "gemini-2.5-flash"];
-const SYSTEM =
-  "You are Garmin Chat, a friendly fitness assistant. Help with workouts, sleep, recovery and training. Be concise and use markdown when it helps. Not medical advice.";
-const SUGGESTIONS = [
-  "Build me a 4-week 10K plan",
-  "How can I improve my sleep score?",
-  "What is a good HRV for my age?",
-  "Explain training readiness",
+const MODELS = [
+  { id: "gpt-5.4-nano", label: "GPT-5.4 nano", note: "fast" },
+  { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", note: "balanced" },
+  { id: "gpt-5.5", label: "GPT-5.5", note: "deep" },
+  { id: "claude-sonnet-4-6", label: "Sonnet 4.6", note: "careful" },
 ];
-const KEY = "garmin-chat:chats";
 
-const uid = () => Math.random().toString(36).slice(2, 10);
+const SUGGESTIONS = [
+  {
+    icon: Moon,
+    title: "Sleep debrief",
+    prompt: "How did I sleep this week? Point out what changed and what to fix first.",
+  },
+  {
+    icon: Zap,
+    title: "Readiness check",
+    prompt: "Why is my training readiness where it is today? Walk me through the drivers.",
+  },
+  {
+    icon: Activity,
+    title: "Compare my runs",
+    prompt: "Compare my last three runs — pace, heart rate, and how hard they actually were.",
+  },
+  {
+    icon: Dumbbell,
+    title: "Plan the week",
+    prompt: "Build my next 7 days of training from my current load, then schedule the workouts.",
+  },
+] as const;
+
+const MAX_TOOL_ROUNDS = 5;
+
+function systemPrompt(status: GarminStatus | null, toolCount: number): string {
+  const today = new Date().toISOString().slice(0, 10);
+  const connection = status?.connected
+    ? `The user's Garmin Connect account is connected with ${toolCount} tools available.`
+    : "The user's Garmin account is NOT connected, so you cannot read their data. Tell them to press Connect Garmin, then continue helping with general training questions.";
+
+  return `You are Garmin Studio, a training analyst with live read access to the user's Garmin Connect account.
+Today is ${today}. ${connection}
+
+Rules:
+- When a question depends on the user's own metrics, call a tool before answering. Never invent numbers, activity names, or dates.
+- Turn relative dates ("this week", "last night") into explicit YYYY-MM-DD ranges, ending today.
+- Prefer summary tools; only pull time series when the detail matters.
+- Cross-check signals (sleep, HRV, resting HR, load, readiness) before recommending a change.
+- Answer in tight markdown: the finding first, the evidence behind it, then one clear next step. Keep it under 200 words unless asked for a plan.
+- You may create workouts or schedule them when asked. Say what you scheduled.
+- If data is missing, say so plainly instead of guessing. This is not medical advice.`;
+}
+
+function isAbort(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
+function errorText(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object") {
+    const record = error as { message?: unknown; error?: { message?: unknown } };
+    if (typeof record.message === "string" && record.message) return record.message;
+    if (typeof record.error?.message === "string" && record.error.message) {
+      return record.error.message;
+    }
+  }
+  return "Something went wrong. Please try again.";
+}
 
 export function ChatApp() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
-  const [model, setModel] = useState<string>(MODELS[0]!);
+  const [model, setModel] = useState<string>(MODELS[0]!.id);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sidebar, setSidebar] = useState(false);
-  const [desktopSidebar, setDesktopSidebar] = useState(true);
-  const [garmin, setGarmin] = useState(false);
-  useEffect(() => {
-    setGarmin(localStorage.getItem("garmin-chat:connected") === "1");
-  }, []);
-  const toggleGarmin = () => {
-    const next = !garmin;
-    setGarmin(next);
-    if (next) localStorage.setItem("garmin-chat:connected", "1");
-    else localStorage.removeItem("garmin-chat:connected");
-  };
+  const [mobileSidebar, setMobileSidebar] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [hydrated, setHydrated] = useState(false);
+
+  const [status, setStatus] = useState<GarminStatus | null>(null);
+  const [garminTools, setGarminTools] = useState<GarminTool[]>([]);
+  const [toolsError, setToolsError] = useState<string | null>(null);
+
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
-  const taRef = useRef<HTMLTextAreaElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const stickRef = useRef(true);
+
+  const connected = status?.connected ?? false;
+  const activeChat = chats.find((chat) => chat.id === activeId) ?? null;
+  const toolsAvailable = garminTools.length || status?.tools || 0;
 
   useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(KEY) || "[]") as Chat[];
-      setChats(saved);
-    } catch {}
-    loadPuter().catch(() => {});
+    setChats(loadChats());
+    setHydrated(true);
+    loadPuter().catch(() => undefined);
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(KEY, JSON.stringify(chats.slice(0, 50)));
-  }, [chats]);
+    if (hydrated) saveChats(chats);
+  }, [chats, hydrated]);
 
-  const active = chats.find((c) => c.id === activeId) ?? null;
+  const refreshTools = useCallback(async (): Promise<GarminTool[]> => {
+    try {
+      const response = await fetch("/api/garmin/tools", { cache: "no-store" });
+      const payload = (await response.json().catch(() => ({}))) as {
+        tools?: GarminTool[];
+        available?: number;
+        error?: string;
+      };
+      if (response.status === 401) {
+        setStatus((previous) => (previous ? { ...previous, connected: false } : previous));
+        setGarminTools([]);
+        setToolsError(payload.error ?? "Garmin session expired.");
+        return [];
+      }
+      if (!response.ok) throw new Error(payload.error ?? "Could not load Garmin tools.");
+      const tools = payload.tools ?? [];
+      setGarminTools(tools);
+      setToolsError(null);
+      setStatus((previous) =>
+        previous
+          ? {
+              ...previous,
+              connected: true,
+              available: payload.available ?? previous.available,
+              tools: tools.length || previous.tools,
+            }
+          : previous,
+      );
+      return tools;
+    } catch (caught) {
+      setToolsError(errorText(caught));
+      return [];
+    }
+  }, []);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [active?.messages]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/garmin/status", { cache: "no-store" });
+        const payload = (await response.json()) as GarminStatus;
+        if (cancelled) return;
+        setStatus(payload);
+        if (payload.connected) await refreshTools();
+      } catch {
+        if (!cancelled) {
+          setStatus({ connected: false, configured: true, tools: 0, available: 0 });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshTools]);
 
   useEffect(() => {
-    const ta = taRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get("garmin");
+    if (!outcome) return;
+    if (outcome === "connected") {
+      toast.success("Garmin connected", {
+        description: "Ask about your sleep, recovery, or training load.",
+      });
+    } else if (outcome === "error") {
+      toast.error("Garmin connection failed", {
+        description: params.get("reason") ?? "Please try again.",
+      });
+    }
+    params.delete("garmin");
+    params.delete("reason");
+    const query = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  }, []);
+
+  useEffect(() => {
+    const element = textareaRef.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${Math.min(element.scrollHeight, 220)}px`;
   }, [input]);
 
-  function newChat() {
-    abortRef.current?.abort();
-    setActiveId(null);
-    setSidebar(false);
-    setError(null);
+  useEffect(() => {
+    if (!stickRef.current) return;
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [activeChat?.messages]);
+
+  function onScroll() {
+    const element = scrollRef.current;
+    if (!element) return;
+    stickRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
   }
 
-  async function send(text: string) {
-    const content = text.trim();
-    if (!content || busy) return;
+  const newChat = useCallback(() => {
+    abortRef.current?.abort();
+    setActiveId(null);
+    setMobileSidebar(false);
     setError(null);
     setInput("");
-    let id = activeId;
-    const userMsg: ChatMsg = { role: "user", content };
-    let history: ChatMsg[];
-    if (!id) {
-      id = uid();
-      history = [userMsg];
-      const chat: Chat = { id, title: content.slice(0, 40), messages: [...history, { role: "assistant", content: "" }], updated: Date.now() };
-      setChats((p) => [chat, ...p]);
-      setActiveId(id);
-    } else {
-      history = [...(active?.messages ?? []), userMsg];
-      setChats((p) =>
-        p.map((c) => (c.id === id ? { ...c, messages: [...history, { role: "assistant", content: "" }], updated: Date.now() } : c)),
-      );
+    stickRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        newChat();
+      }
     }
-    const chatId = id;
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setBusy(true);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [newChat]);
+
+  function deleteChat(id: string) {
+    setChats((previous) => previous.filter((chat) => chat.id !== id));
+    if (activeId === id) setActiveId(null);
+  }
+
+  function connectGarmin() {
+    if (status && !status.configured) {
+      toast.error("Garmin isn't configured", {
+        description: "Add SESSION_SECRET to this deployment's environment variables.",
+      });
+      return;
+    }
+    window.location.assign("/api/garmin/connect");
+  }
+
+  async function disconnectGarmin() {
     try {
-      await streamChat([{ role: "system", content: SYSTEM }, ...history], model, (t) => {
-        setChats((p) =>
-          p.map((c) => {
-            if (c.id !== chatId) return c;
-            const msgs = [...c.messages];
-            const last = msgs[msgs.length - 1];
-            if (!last) return c;
-            msgs[msgs.length - 1] = { role: last.role, content: last.content + t };
-            return { ...c, messages: msgs };
-          }),
-        );
-      }, ctrl.signal);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : (e as { error?: { message?: string } })?.error?.message;
-      setError(msg || "Something went wrong. Please try again.");
-      setChats((p) =>
-        p.map((c) => (c.id === chatId && !c.messages[c.messages.length - 1]?.content ? { ...c, messages: c.messages.slice(0, -1) } : c)),
+      await fetch("/api/garmin/disconnect", { method: "POST" });
+    } catch {
+      // Cookie clearing is best-effort; local state still resets.
+    }
+    setGarminTools([]);
+    setToolsError(null);
+    setStatus((previous) =>
+      previous ? { ...previous, connected: false, available: 0 } : previous,
+    );
+    toast("Garmin disconnected", { description: "Your token cookie has been cleared." });
+  }
+
+  async function requestTool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+    const response = await fetch("/api/garmin/call", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, arguments: args }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as Partial<ToolResult> & {
+      error?: string;
+    };
+    if (response.status === 401) {
+      setStatus((previous) => (previous ? { ...previous, connected: false } : previous));
+      setGarminTools([]);
+      throw new Error(payload.error ?? "Garmin session expired. Reconnect to continue.");
+    }
+    if (!response.ok) {
+      throw new Error(payload.error ?? `Garmin tool "${name}" failed.`);
+    }
+    return {
+      ok: payload.ok ?? true,
+      isError: payload.isError ?? false,
+      text: payload.text ?? "No data returned.",
+    };
+  }
+
+  async function send(raw: string) {
+    const text = raw.trim();
+    if (!text || busy) return;
+
+    setError(null);
+    setInput("");
+    stickRef.current = true;
+
+    const userMessage: Message = { id: uid(), role: "user", content: text, steps: [] };
+    const assistantId = uid();
+    const assistantMessage: Message = {
+      id: assistantId,
+      role: "assistant",
+      content: "",
+      steps: [],
+    };
+
+    const priorMessages = activeChat?.messages ?? [];
+
+    const chatId = activeChat?.id ?? uid();
+    if (activeChat) {
+      setChats((previous) =>
+        previous.map((chat) =>
+          chat.id === chatId
+            ? {
+                ...chat,
+                messages: [...chat.messages, userMessage, assistantMessage],
+                updated: Date.now(),
+              }
+            : chat,
+        ),
       );
+    } else {
+      setChats((previous) => [
+        {
+          id: chatId,
+          title: text.slice(0, 52),
+          messages: [userMessage, assistantMessage],
+          updated: Date.now(),
+        },
+        ...previous,
+      ]);
+      setActiveId(chatId);
+    }
+
+    const patchMessage = (patch: (message: Message) => Message) => {
+      setChats((previous) =>
+        previous.map((chat) =>
+          chat.id === chatId
+            ? {
+                ...chat,
+                updated: Date.now(),
+                messages: chat.messages.map((message) =>
+                  message.id === assistantId ? patch(message) : message,
+                ),
+              }
+            : chat,
+        ),
+      );
+    };
+
+    const addStep = (step: TraceStep) => {
+      patchMessage((message) => ({ ...message, steps: [...message.steps, step] }));
+    };
+
+    const patchStep = (id: string, patch: Partial<TraceStep>) => {
+      patchMessage((message) => ({
+        ...message,
+        steps: message.steps.map((step) => (step.id === id ? { ...step, ...patch } : step)),
+      }));
+    };
+
+    const appendText = (delta: string) => {
+      patchMessage((message) => ({ ...message, content: message.content + delta }));
+    };
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setBusy(true);
+
+    let tools = connected ? toolSpecs(garminTools) : [];
+    if (connected && tools.length === 0) {
+      const loaded = await refreshTools();
+      tools = toolSpecs(loaded);
+    }
+
+    const history: AgentMessage[] = [
+      { role: "system", content: systemPrompt(status, tools.length) },
+      ...priorMessages
+        .filter((message) => message.content.trim().length > 0)
+        .map((message) => ({ role: message.role, content: message.content })),
+      { role: "user", content: text },
+    ];
+
+    try {
+      for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        if (controller.signal.aborted) break;
+
+        const thinkingId = `thinking-${assistantId}-${round}`;
+        const thinkingStart = performance.now();
+        addStep({
+          id: thinkingId,
+          kind: "thinking",
+          label: round === 0 ? "Thinking" : "Reviewing your data",
+          status: "active",
+        });
+
+        const turn = await runRound(history, {
+          model,
+          signal: controller.signal,
+          ...(tools.length > 0 && round < MAX_TOOL_ROUNDS - 1 ? { tools } : {}),
+          onEvent: (event) => {
+            if (event.type === "reasoning") {
+              setChats((previous) =>
+                previous.map((chat) =>
+                  chat.id === chatId
+                    ? {
+                        ...chat,
+                        messages: chat.messages.map((message) => {
+                          if (message.id !== assistantId) return message;
+                          return {
+                            ...message,
+                            steps: message.steps.map((step) =>
+                              step.id === thinkingId
+                                ? {
+                                    ...step,
+                                    text: `${step.text ?? ""}${event.text}`.slice(0, 6000),
+                                  }
+                                : step,
+                            ),
+                          };
+                        }),
+                      }
+                    : chat,
+                ),
+              );
+              return;
+            }
+
+            if (event.type === "text") {
+              appendText(event.text);
+              return;
+            }
+
+            // A tool call ends the thinking phase for this round.
+            patchStep(thinkingId, {
+              status: "done",
+              ms: performance.now() - thinkingStart,
+            });
+            const { label, detail } = describeTool(event.call.name, event.call.input);
+            addStep({
+              id: `tool-${event.call.id}`,
+              kind: "tool",
+              label,
+              ...(detail ? { detail } : {}),
+              status: "active",
+            });
+          },
+        });
+
+        if (controller.signal.aborted) break;
+
+        patchStep(thinkingId, {
+          status: "done",
+          ms: performance.now() - thinkingStart,
+        });
+        history.push(turn.assistant);
+
+        if (turn.toolCalls.length === 0) break;
+
+        for (const call of turn.toolCalls) {
+          if (controller.signal.aborted) break;
+          const stepId = `tool-${call.id}`;
+          const startedAt = performance.now();
+          try {
+            const result = await requestTool(call.name, call.input);
+            history.push({ role: "tool", tool_call_id: call.id, content: result.text });
+            patchStep(stepId, {
+              status: result.ok ? "done" : "error",
+              ms: performance.now() - startedAt,
+              preview: `${formatBytes(result.text)} · ${result.ok ? "loaded" : "tool reported an error"}`,
+            });
+          } catch (caught) {
+            const message = errorText(caught);
+            history.push({
+              role: "tool",
+              tool_call_id: call.id,
+              content: `Error: ${message}`,
+            });
+            patchStep(stepId, {
+              status: "error",
+              ms: performance.now() - startedAt,
+              preview: message.slice(0, 140),
+            });
+          }
+        }
+      }
+
+      if (controller.signal.aborted) {
+        patchMessage((message) => ({
+          ...message,
+          content: message.content || "Stopped.",
+          steps: message.steps.map((step) =>
+            step.status === "active"
+              ? { ...step, status: "done", label: `${step.label} · stopped` }
+              : step,
+          ),
+        }));
+      } else {
+        patchMessage((message) => {
+          if (message.content.trim()) return message;
+          return {
+            ...message,
+            content:
+              "I looked at your Garmin data but couldn't settle on an answer. Try asking a narrower question — for example a specific date range.",
+            steps: message.steps.map((step) =>
+              step.status === "active" ? { ...step, status: "done" } : step,
+            ),
+          };
+        });
+      }
+    } catch (caught) {
+      if (controller.signal.aborted || isAbort(caught)) {
+        patchMessage((message) => ({
+          ...message,
+          steps: message.steps.map((step) =>
+            step.status === "active" ? { ...step, status: "done" } : step,
+          ),
+        }));
+      } else {
+        const message = errorText(caught);
+        setError(message);
+        patchMessage((existing) => ({
+          ...existing,
+          ...(existing.content ? {} : { content: "" }),
+          error: message,
+          steps: existing.steps.map((step) =>
+            step.status === "active" ? { ...step, status: "error" } : step,
+          ),
+        }));
+      }
     } finally {
       setBusy(false);
       abortRef.current = null;
     }
   }
 
-  function deleteChat(id: string) {
-    setChats((p) => p.filter((c) => c.id !== id));
-    if (activeId === id) setActiveId(null);
-  }
+  const liveStep = busy
+    ? [...(activeChat?.messages ?? [])]
+        .reverse()
+        .flatMap((message) => [...message.steps].reverse())
+        .find((step) => step.status === "active")
+    : undefined;
 
   const composer = (
     <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        send(input);
+      onSubmit={(event) => {
+        event.preventDefault();
+        void send(input);
       }}
-      className="flex items-end gap-2 rounded-3xl border border-border bg-background p-2 pl-4 shadow-composer"
+      className="rounded-[26px] border border-border bg-card p-2.5 shadow-composer transition-shadow focus-within:border-foreground/25 focus-within:shadow-composer-focus"
     >
       <textarea
-        ref={taRef}
+        ref={textareaRef}
         rows={1}
         value={input}
-        onChange={(e) => setInput(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            send(input);
+        onChange={(event) => setInput(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            void send(input);
           }
         }}
-        placeholder="Ask anything"
-        className="max-h-[200px] flex-1 resize-none bg-transparent py-2 text-[15px] outline-none placeholder:text-muted-foreground"
+        placeholder={connected ? "Ask about your sleep, training load, recovery…" : "Ask anything"}
+        aria-label="Message"
+        className="max-h-[220px] w-full resize-none bg-transparent px-3 py-2.5 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground/80"
       />
-      {busy ? (
-        <button type="button" onClick={() => abortRef.current?.abort()} aria-label="Stop" className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground">
-          <Square className="size-3.5 fill-current" />
-        </button>
-      ) : (
-        <button type="submit" disabled={!input.trim()} aria-label="Send" className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-25">
-          <ArrowUp className="size-4" strokeWidth={2.5} />
-        </button>
-      )}
+      <div className="flex items-center gap-1.5 px-1 pt-1">
+        {connected ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-2.5 py-1 text-[11.5px] font-medium text-brand-ink">
+            <span className="relative flex size-1.5">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-brand opacity-60" />
+              <span className="relative inline-flex size-1.5 rounded-full bg-brand" />
+            </span>
+            Garmin live
+            <span className="text-brand-ink/60">· {toolsAvailable}</span>
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={connectGarmin}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[11.5px] font-medium text-muted-foreground transition-colors hover:border-brand/40 hover:text-foreground"
+          >
+            <Plug className="size-3" />
+            Connect Garmin
+          </button>
+        )}
+
+        <label className="relative ml-auto inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+          {MODELS.find((option) => option.id === model)?.label ?? model}
+          <ChevronDown className="size-3" />
+          <select
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+            aria-label="Model"
+            className="absolute inset-0 cursor-pointer opacity-0"
+          >
+            {MODELS.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label} — {option.note}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {busy ? (
+          <button
+            type="button"
+            onClick={() => abortRef.current?.abort()}
+            aria-label="Stop generating"
+            className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95"
+          >
+            <Square className="size-2.5 fill-current" />
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={!input.trim()}
+            aria-label="Send message"
+            className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-transform enabled:hover:opacity-90 disabled:opacity-20 active:scale-95"
+          >
+            <ArrowUp className="size-4" strokeWidth={2.5} />
+          </button>
+        )}
+      </div>
     </form>
   );
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background text-foreground">
-      {sidebar && <div className="fixed inset-0 z-30 bg-foreground/20 md:hidden" onClick={() => setSidebar(false)} />}
+      <Toaster position="top-center" />
+
+      {mobileSidebar && (
+        <div
+          className="fixed inset-0 z-30 bg-foreground/25 backdrop-blur-[2px] md:hidden"
+          onClick={() => setMobileSidebar(false)}
+        />
+      )}
+
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col bg-sidebar transition-transform md:static md:translate-x-0 ${
-          sidebar ? "translate-x-0" : "-translate-x-full"
-        } ${desktopSidebar ? "md:flex" : "md:hidden"}`}
+        className={cn(
+          "fixed inset-y-0 left-0 z-40 flex w-[264px] flex-col border-r border-sidebar-border bg-sidebar transition-transform duration-200 md:static md:translate-x-0",
+          mobileSidebar ? "translate-x-0" : "-translate-x-full",
+          sidebarOpen ? "md:flex" : "md:hidden",
+        )}
       >
-        <div className="flex items-center justify-between p-3">
-          <button onClick={() => { setSidebar(false); setDesktopSidebar(false); }} aria-label="Close sidebar" className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-sidebar-accent">
-            <PanelLeft className="size-5" />
-          </button>
-          <button onClick={newChat} aria-label="New chat" className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-sidebar-accent">
-            <SquarePen className="size-5" />
+        <div className="flex items-center gap-2 px-3 pb-2 pt-3">
+          <div className="grid size-8 place-items-center rounded-[10px] bg-primary text-primary-foreground">
+            <Activity className="size-4" strokeWidth={2.4} />
+          </div>
+          <div className="min-w-0 flex-1 leading-tight">
+            <p className="truncate text-[13px] font-semibold tracking-tight">Garmin Studio</p>
+            <p className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
+              MCP training analyst
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              setMobileSidebar(false);
+              setSidebarOpen(false);
+            }}
+            aria-label="Close sidebar"
+            className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+          >
+            <PanelLeft className="size-4" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-2 pb-3">
-          {chats.length > 0 && <p className="px-3 pb-1 pt-3 text-xs font-medium text-muted-foreground">Chats</p>}
-          {chats.map((c) => (
-            <div key={c.id} className={`group flex items-center rounded-lg ${c.id === activeId ? "bg-sidebar-accent" : "hover:bg-sidebar-accent"}`}>
-              <button onClick={() => { setActiveId(c.id); setSidebar(false); }} className="flex-1 truncate px-3 py-2 text-left text-sm">
-                {c.title || "New chat"}
-              </button>
-              <button onClick={() => deleteChat(c.id)} aria-label="Delete chat" className="mr-1 grid size-7 place-items-center rounded-md text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100">
-                <Trash2 className="size-3.5" />
-              </button>
+
+        <div className="px-2 pb-2 pt-1">
+          <button
+            onClick={newChat}
+            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors hover:bg-sidebar-accent"
+          >
+            <SquarePen className="size-4" />
+            New thread
+            <span className="ml-auto font-mono text-[9.5px] text-muted-foreground">⌘K</span>
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+          {chats.length === 0 ? (
+            <p className="px-3 py-6 text-[12px] leading-relaxed text-muted-foreground">
+              No threads yet. Ask a question to start one.
+            </p>
+          ) : (
+            <>
+              <p className="px-3 pb-1 pt-3 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
+                Recent
+              </p>
+              {chats.map((chat) => (
+                <div
+                  key={chat.id}
+                  className={cn(
+                    "group flex items-center rounded-lg transition-colors",
+                    chat.id === activeId ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/70",
+                  )}
+                >
+                  <button
+                    onClick={() => {
+                      setActiveId(chat.id);
+                      setMobileSidebar(false);
+                    }}
+                    className="min-w-0 flex-1 px-3 py-2 text-left"
+                  >
+                    <span className="block truncate text-[13px]">{chat.title || "New thread"}</span>
+                    <span className="block truncate text-[10.5px] text-muted-foreground">
+                      {relativeTime(chat.updated)}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => deleteChat(chat.id)}
+                    aria-label={`Delete ${chat.title}`}
+                    className="mr-1 grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+
+        <div className="border-t border-sidebar-border p-2.5">
+          <div className="rounded-xl border border-border/70 bg-card/70 p-2.5">
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full",
+                  connected ? "bg-brand" : "bg-muted-foreground/40",
+                )}
+              />
+              <p className="min-w-0 flex-1 truncate text-[12px] font-medium">
+                {connected ? "Garmin connected" : "Garmin not connected"}
+              </p>
+              {connected ? (
+                <button
+                  onClick={() => void disconnectGarmin()}
+                  aria-label="Disconnect Garmin"
+                  className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <Unplug className="size-3.5" />
+                </button>
+              ) : (
+                <button
+                  onClick={connectGarmin}
+                  className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-brand-ink hover:bg-brand-soft"
+                >
+                  Connect
+                </button>
+              )}
             </div>
-          ))}
+            <p className="mt-0.5 text-[10.5px] leading-relaxed text-muted-foreground">
+              {connected
+                ? `${toolsAvailable} tools · token stays on the server`
+                : "Read your Garmin data inside the chat."}
+            </p>
+          </div>
+          <a
+            href="https://developer.puter.com"
+            target="_blank"
+            rel="noreferrer"
+            className="mt-2 block px-1 font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground/70 hover:text-muted-foreground"
+          >
+            Powered by Puter
+          </a>
         </div>
-        <div className="border-t border-sidebar-border p-3 text-xs text-muted-foreground">Guest session · no sign-in needed</div>
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-1 px-2">
-          <button onClick={() => setSidebar(true)} aria-label="Open sidebar" className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-accent md:hidden">
-            <Menu className="size-5" />
+        <header className="flex h-14 shrink-0 items-center gap-1.5 border-b border-border/60 px-2.5">
+          <button
+            onClick={() => setMobileSidebar(true)}
+            aria-label="Open sidebar"
+            className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent md:hidden"
+          >
+            <Menu className="size-4" />
           </button>
-          {!desktopSidebar && (
-            <>
-              <button onClick={() => setDesktopSidebar(true)} aria-label="Open sidebar" className="hidden size-9 place-items-center rounded-lg text-muted-foreground hover:bg-accent md:grid">
-                <PanelLeft className="size-5" />
-              </button>
-              <button onClick={newChat} aria-label="New chat" className="hidden size-9 place-items-center rounded-lg text-muted-foreground hover:bg-accent md:grid">
-                <SquarePen className="size-5" />
-              </button>
-            </>
-          )}
-          <label className="relative flex items-center rounded-lg px-2 py-1.5 hover:bg-accent">
-            <span className="text-[17px] font-medium">Garmin Chat</span>
-            <span className="ml-1.5 text-[15px] text-muted-foreground">{model}</span>
-            <ChevronDown className="ml-1 size-4 text-muted-foreground" />
-            <select value={model} onChange={(e) => setModel(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" aria-label="Model">
-              {MODELS.map((m) => <option key={m}>{m}</option>)}
-            </select>
-          </label>
-          <div className="ml-auto md:hidden">
-            <button onClick={newChat} aria-label="New chat" className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-accent">
-              <SquarePen className="size-5" />
+          {!sidebarOpen && (
+            <button
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open sidebar"
+              className="hidden size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent md:grid"
+            >
+              <PanelLeft className="size-4" />
             </button>
+          )}
+          <div className="min-w-0 px-1">
+            <p className="truncate text-[13.5px] font-medium">
+              {activeChat?.title || "New thread"}
+            </p>
+            <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+              {connected ? "grounded in Garmin" : "general training chat"}
+            </p>
           </div>
+
+          {connected ? (
+            <div
+              className="ml-auto hidden items-center gap-1.5 rounded-full border border-brand/30 bg-brand-soft px-2.5 py-1 text-[11px] font-medium text-brand-ink sm:inline-flex"
+              title="Garmin tools are live for this session"
+            >
+              <span className="size-1.5 rounded-full bg-brand" />
+              {toolsAvailable} tools live
+            </div>
+          ) : (
+            <button
+              onClick={connectGarmin}
+              className="ml-auto hidden items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
+            >
+              <Plug className="size-3" />
+              Connect Garmin
+            </button>
+          )}
+          <button
+            onClick={newChat}
+            aria-label="New thread"
+            className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent"
+          >
+            <SquarePen className="size-4" />
+          </button>
         </header>
 
-        {!active ? (
-          <div className="flex flex-1 flex-col items-center justify-center px-4 pb-16">
-            <h1 className="mb-4 text-center text-[28px] font-medium tracking-tight">Ask me about your data</h1>
-            <button
-              onClick={toggleGarmin}
-              className={
-                garmin
-                  ? "mb-8 rounded-full border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  : "mb-8 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-              }
-            >
-              {garmin ? "Disconnect Garmin" : "Connect Garmin"}
-            </button>
-            <div className="w-full max-w-3xl">{composer}</div>
-            <div className="mt-4 flex max-w-3xl flex-wrap justify-center gap-2">
-              {SUGGESTIONS.map((s) => (
-                <button key={s} onClick={() => send(s)} className="rounded-full border border-border px-3.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-                  {s}
-                </button>
-              ))}
-            </div>
-            {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
-          </div>
-        ) : (
-          <>
-            <div className="flex-1 overflow-y-auto">
-              <div className="mx-auto w-full max-w-3xl space-y-8 px-4 py-6">
-                {active.messages.map((m, i) => (
-                  <Message key={i} msg={m} pending={busy && i === active.messages.length - 1} />
-                ))}
-                {error && <p className="text-sm text-destructive">{error}</p>}
-                <div ref={endRef} />
+        <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
+          {!activeChat ? (
+            <div className="relative mx-auto w-full max-w-3xl px-4 pb-8 pt-10 sm:pt-16">
+              <div
+                aria-hidden="true"
+                className="hero-grid pointer-events-none absolute inset-x-0 top-0 h-72"
+              />
+
+              <div className="relative">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-card px-2.5 py-1 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
+                  <HeartPulse className="size-3 text-brand" />
+                  Garmin Connect · MCP
+                </span>
+
+                <h1 className="mt-5 text-[34px] font-medium leading-[1.06] tracking-[-0.035em] sm:text-[46px]">
+                  Your training,
+                  <br />
+                  <span className="text-brand-ink">in conversation.</span>
+                </h1>
+                <p className="mt-4 max-w-lg text-[14.5px] leading-relaxed text-muted-foreground">
+                  Sleep, recovery, load, workouts — read straight from your Garmin account. Every
+                  step the assistant takes is shown as it happens.
+                </p>
+
+                <div className="mt-7 rounded-2xl border border-border bg-card p-3.5 shadow-[0_1px_0_oklch(0_0_0/2%),0_18px_40px_-32px_oklch(0_0_0/28%)]">
+                  {connected ? (
+                    <div className="flex items-start gap-3">
+                      <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-ink">
+                        <ShieldCheck className="size-4" strokeWidth={2} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13.5px] font-semibold">Garmin is connected</p>
+                        <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+                          {toolsAvailable} tools available. The access token is sealed in an
+                          httpOnly cookie — your browser never sees it.
+                        </p>
+                        {toolsError && (
+                          <p className="mt-1 text-[11.5px] text-destructive">{toolsError}</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => void disconnectGarmin()}
+                        className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-ink">
+                        <Plug className="size-4" strokeWidth={2} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13.5px] font-semibold">Connect your Garmin account</p>
+                        <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+                          One sign-in through the open-source MissingMCP gateway. Your Garmin
+                          password is never stored.
+                        </p>
+                        {!status?.configured && (
+                          <p className="mt-1 text-[11.5px] text-destructive">
+                            Missing SESSION_SECRET on this deployment.
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={connectGarmin}
+                        className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                      >
+                        <Plug className="size-3.5" />
+                        Connect Garmin
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-6 grid gap-2 sm:grid-cols-2">
+                  {SUGGESTIONS.map((suggestion) => (
+                    <button
+                      key={suggestion.title}
+                      onClick={() => void send(suggestion.prompt)}
+                      className="group flex items-start gap-2.5 rounded-xl border border-border/80 bg-card/60 px-3.5 py-3 text-left transition-all hover:border-foreground/20 hover:bg-card hover:shadow-[0_10px_24px_-20px_oklch(0_0_0/40%)]"
+                    >
+                      <suggestion.icon
+                        className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-brand-ink"
+                        strokeWidth={1.9}
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-[12.5px] font-medium">{suggestion.title}</span>
+                        <span className="mt-0.5 block text-[11.5px] leading-relaxed text-muted-foreground">
+                          {suggestion.prompt}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-1.5 font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground/70">
+                  <span className="inline-flex items-center gap-1">
+                    <ShieldCheck className="size-3" /> httpOnly token
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <RefreshCw className="size-3" /> {status?.tools ?? 38} curated tools
+                  </span>
+                  <span>Not medical advice</span>
+                </div>
               </div>
             </div>
-            <div className="mx-auto w-full max-w-3xl px-4 pb-3">
-              {composer}
-              <p className="mt-2 text-center text-xs text-muted-foreground">AI can make mistakes. Not medical advice.</p>
+          ) : (
+            <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:py-8">
+              <div className="space-y-7">
+                {activeChat.messages.map((message) => (
+                  <MessageBubble
+                    key={message.id}
+                    message={message}
+                    running={busy && message.id === activeChat.messages.at(-1)?.id}
+                  />
+                ))}
+              </div>
+              <div ref={endRef} className="h-4" />
             </div>
-          </>
-        )}
+          )}
+        </div>
+
+        <div className="shrink-0 bg-background">
+          <div className="mx-auto w-full max-w-3xl px-4 pb-3">
+            {liveStep && (
+              <div
+                className="mb-2 flex items-center gap-2 px-2 text-[11.5px] text-muted-foreground"
+                aria-live="polite"
+              >
+                <Loader2 className="size-3 animate-spin text-brand" />
+                <span className="truncate">
+                  {liveStep.kind === "tool"
+                    ? `${liveStep.label}${liveStep.detail ? ` · ${liveStep.detail}` : ""}`
+                    : liveStep.label}
+                </span>
+              </div>
+            )}
+
+            {composer}
+
+            <div className="mt-2 flex items-center justify-between px-2 font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground/70">
+              <span>Enter to send · Shift + Enter for a new line</span>
+              <span className="hidden sm:inline">AI can make mistakes</span>
+            </div>
+
+            {error && (
+              <div className="mt-2 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1">{error}</span>
+                <button
+                  onClick={() => setError(null)}
+                  className="shrink-0 text-[11px] underline underline-offset-2"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </main>
     </div>
   );
 }
 
-function Message({ msg, pending }: { msg: ChatMsg; pending: boolean }) {
+function MessageBubble({ message, running }: { message: Message; running: boolean }) {
   const [copied, setCopied] = useState(false);
-  if (msg.role === "user") {
+
+  if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] whitespace-pre-wrap rounded-3xl bg-secondary px-5 py-2.5 text-[15px]">{msg.content}</div>
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-[20px] rounded-br-md bg-secondary px-4 py-2.5 text-[14.5px] leading-relaxed">
+          {message.content}
+        </div>
       </div>
     );
   }
-  if (!msg.content && pending) {
-    return <div className="size-3 animate-pulse rounded-full bg-foreground" />;
-  }
+
+  const empty = !message.content && message.steps.length === 0 && !message.error;
+
   return (
     <div className="group">
-      <div className="prose-chat">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className="grid size-5 place-items-center rounded-md bg-primary text-primary-foreground">
+          <Activity className="size-3" strokeWidth={2.6} />
+        </span>
+        <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
+          Garmin Studio
+        </span>
       </div>
-      {!pending && (
-        <button
-          onClick={() => {
-            navigator.clipboard.writeText(msg.content);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          }}
-          aria-label="Copy"
-          className="mt-2 grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent"
-        >
-          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-        </button>
+
+      <AgentTrace steps={message.steps} running={running} />
+
+      {empty && running && (
+        <div className="flex items-center gap-1.5 py-1" aria-label="Thinking">
+          <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.2s]" />
+          <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.1s]" />
+          <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/60" />
+        </div>
+      )}
+
+      {message.content && (
+        <div className="prose-chat">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+        </div>
+      )}
+
+      {message.error && (
+        <div className="mt-2 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+          <span>{message.error}</span>
+        </div>
+      )}
+
+      {!running && message.content && (
+        <div className="mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <button
+            onClick={() => {
+              void navigator.clipboard
+                ?.writeText(message.content)
+                .then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                })
+                .catch(() => undefined);
+            }}
+            aria-label="Copy answer"
+            className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+          </button>
+        </div>
       )}
     </div>
   );

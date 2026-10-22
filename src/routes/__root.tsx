@@ -78,11 +78,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Garmin Chat" },
-      { name: "description", content: "Chat about your training, sleep and recovery." },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Garmin Chat" },
-      { property: "og:description", content: "Chat about your training, sleep and recovery." },
+      { title: "Garmin Studio" },
+      {
+        name: "description",
+        content:
+          "A training analyst with live read access to your Garmin Connect data — and a visible chain of thought.",
+      },
+      { property: "og:title", content: "Garmin Studio" },
+      {
+        property: "og:description",
+        content:
+          "A training analyst with live read access to your Garmin Connect data — and a visible chain of thought.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:site", content: "@Lovable" },
@@ -93,7 +100,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         href: appCss,
       },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap" },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap",
+      },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
     ],
   }),

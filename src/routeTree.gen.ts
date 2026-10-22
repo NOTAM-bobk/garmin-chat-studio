@@ -10,33 +10,115 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiGarminCallRouteImport } from './routes/api/garmin/call'
+import { Route as ApiGarminCallbackRouteImport } from './routes/api/garmin/callback'
+import { Route as ApiGarminConnectRouteImport } from './routes/api/garmin/connect'
+import { Route as ApiGarminDisconnectRouteImport } from './routes/api/garmin/disconnect'
+import { Route as ApiGarminStatusRouteImport } from './routes/api/garmin/status'
+import { Route as ApiGarminToolsRouteImport } from './routes/api/garmin/tools'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiGarminCallRoute = ApiGarminCallRouteImport.update({
+  id: '/api/garmin/call',
+  path: '/api/garmin/call',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGarminCallbackRoute = ApiGarminCallbackRouteImport.update({
+  id: '/api/garmin/callback',
+  path: '/api/garmin/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGarminConnectRoute = ApiGarminConnectRouteImport.update({
+  id: '/api/garmin/connect',
+  path: '/api/garmin/connect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGarminDisconnectRoute = ApiGarminDisconnectRouteImport.update({
+  id: '/api/garmin/disconnect',
+  path: '/api/garmin/disconnect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGarminStatusRoute = ApiGarminStatusRouteImport.update({
+  id: '/api/garmin/status',
+  path: '/api/garmin/status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiGarminToolsRoute = ApiGarminToolsRouteImport.update({
+  id: '/api/garmin/tools',
+  path: '/api/garmin/tools',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/garmin/call': typeof ApiGarminCallRoute
+  '/api/garmin/callback': typeof ApiGarminCallbackRoute
+  '/api/garmin/connect': typeof ApiGarminConnectRoute
+  '/api/garmin/disconnect': typeof ApiGarminDisconnectRoute
+  '/api/garmin/status': typeof ApiGarminStatusRoute
+  '/api/garmin/tools': typeof ApiGarminToolsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/garmin/call': typeof ApiGarminCallRoute
+  '/api/garmin/callback': typeof ApiGarminCallbackRoute
+  '/api/garmin/connect': typeof ApiGarminConnectRoute
+  '/api/garmin/disconnect': typeof ApiGarminDisconnectRoute
+  '/api/garmin/status': typeof ApiGarminStatusRoute
+  '/api/garmin/tools': typeof ApiGarminToolsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/garmin/call': typeof ApiGarminCallRoute
+  '/api/garmin/callback': typeof ApiGarminCallbackRoute
+  '/api/garmin/connect': typeof ApiGarminConnectRoute
+  '/api/garmin/disconnect': typeof ApiGarminDisconnectRoute
+  '/api/garmin/status': typeof ApiGarminStatusRoute
+  '/api/garmin/tools': typeof ApiGarminToolsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/api/garmin/call'
+    | '/api/garmin/callback'
+    | '/api/garmin/connect'
+    | '/api/garmin/disconnect'
+    | '/api/garmin/status'
+    | '/api/garmin/tools'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/api/garmin/call'
+    | '/api/garmin/callback'
+    | '/api/garmin/connect'
+    | '/api/garmin/disconnect'
+    | '/api/garmin/status'
+    | '/api/garmin/tools'
+  id:
+    | '__root__'
+    | '/'
+    | '/api/garmin/call'
+    | '/api/garmin/callback'
+    | '/api/garmin/connect'
+    | '/api/garmin/disconnect'
+    | '/api/garmin/status'
+    | '/api/garmin/tools'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiGarminCallRoute: typeof ApiGarminCallRoute
+  ApiGarminCallbackRoute: typeof ApiGarminCallbackRoute
+  ApiGarminConnectRoute: typeof ApiGarminConnectRoute
+  ApiGarminDisconnectRoute: typeof ApiGarminDisconnectRoute
+  ApiGarminStatusRoute: typeof ApiGarminStatusRoute
+  ApiGarminToolsRoute: typeof ApiGarminToolsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +130,59 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/garmin/call': {
+      id: '/api/garmin/call'
+      path: '/api/garmin/call'
+      fullPath: '/api/garmin/call'
+      preLoaderRoute: typeof ApiGarminCallRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/garmin/callback': {
+      id: '/api/garmin/callback'
+      path: '/api/garmin/callback'
+      fullPath: '/api/garmin/callback'
+      preLoaderRoute: typeof ApiGarminCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/garmin/connect': {
+      id: '/api/garmin/connect'
+      path: '/api/garmin/connect'
+      fullPath: '/api/garmin/connect'
+      preLoaderRoute: typeof ApiGarminConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/garmin/disconnect': {
+      id: '/api/garmin/disconnect'
+      path: '/api/garmin/disconnect'
+      fullPath: '/api/garmin/disconnect'
+      preLoaderRoute: typeof ApiGarminDisconnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/garmin/status': {
+      id: '/api/garmin/status'
+      path: '/api/garmin/status'
+      fullPath: '/api/garmin/status'
+      preLoaderRoute: typeof ApiGarminStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/garmin/tools': {
+      id: '/api/garmin/tools'
+      path: '/api/garmin/tools'
+      fullPath: '/api/garmin/tools'
+      preLoaderRoute: typeof ApiGarminToolsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiGarminCallRoute: ApiGarminCallRoute,
+  ApiGarminCallbackRoute: ApiGarminCallbackRoute,
+  ApiGarminConnectRoute: ApiGarminConnectRoute,
+  ApiGarminDisconnectRoute: ApiGarminDisconnectRoute,
+  ApiGarminStatusRoute: ApiGarminStatusRoute,
+  ApiGarminToolsRoute: ApiGarminToolsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

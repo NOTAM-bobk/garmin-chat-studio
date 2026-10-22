@@ -1203,7 +1203,7 @@ export function ChatApp() {
                 aria-live="polite"
               >
                 <Loader2 className="size-3 animate-spin" />
-                <span className="truncate">
+                <span className="shimmer-text truncate">
                   {liveStep.kind === "tool"
                     ? `${liveStep.label}${liveStep.detail ? ` · ${liveStep.detail}` : ""}`
                     : liveStep.label}
@@ -1278,7 +1278,7 @@ export function ChatApp() {
                     aria-live="polite"
                   >
                     <Loader2 className="size-3 animate-spin" />
-                    <span className="truncate">
+                    <span className="shimmer-text truncate">
                       {liveStep.kind === "tool"
                         ? `${liveStep.label}${liveStep.detail ? ` · ${liveStep.detail}` : ""}`
                         : liveStep.label}
@@ -1512,7 +1512,7 @@ function MessageBubble({
   return (
     <div className="group animate-in fade-in-0 duration-300">
       <Thinking steps={message.steps} running={running} />
-      <ToolActivity steps={message.steps} />
+      <ToolActivity steps={message.steps} running={running} />
 
       {empty && running && (
         <div className="flex items-center gap-1.5 py-1" aria-label="Thinking">

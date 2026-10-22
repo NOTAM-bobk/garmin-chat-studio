@@ -183,9 +183,22 @@
     -webkit-mask-image: linear-gradient(to bottom, black 62%, transparent 100%);
   }
 
+  /* Live reasoning shimmers like a status line while it streams in. */
   .thinking-layer.is-live {
     max-height: 15rem;
-    color: color-mix(in oklab, var(--color-muted-foreground) 80%, transparent);
+    background-image: linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--color-muted-foreground) 68%, transparent) 0%,
+      color-mix(in oklab, var(--color-muted-foreground) 68%, transparent) 40%,
+      color-mix(in oklab, var(--color-foreground) 85%, transparent) 50%,
+      color-mix(in oklab, var(--color-muted-foreground) 68%, transparent) 60%,
+      color-mix(in oklab, var(--color-muted-foreground) 68%, transparent) 100%
+    );
+    background-size: 240% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: shimmer 2.6s linear infinite;
   }
 
   /* Streamed answers: steady reveal, briefly blue while text is landing. */

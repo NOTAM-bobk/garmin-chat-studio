@@ -4,6 +4,8 @@ export type TraceStep = {
   id: string;
   kind: "thinking" | "tool";
   label: string;
+  /** Raw MCP tool name, shown in the tool list. */
+  tool?: string;
   detail?: string;
   status: StepStatus;
   ms?: number;
@@ -19,6 +21,8 @@ export type Message = {
   content: string;
   steps: TraceStep[];
   error?: string;
+  /** Local thumbs feedback, kept in this browser only. */
+  feedback?: "up" | "down";
 };
 
 export type Chat = {
@@ -47,6 +51,7 @@ function sanitizeMessage(raw: unknown): Message | null {
           const kind = item["kind"] === "thinking" ? "thinking" : "tool";
           const status = item["status"];
           const detail = typeof item["detail"] === "string" ? item["detail"] : undefined;
+          const tool = typeof item["tool"] === "string" ? item["tool"] : undefined;
           const ms = typeof item["ms"] === "number" ? item["ms"] : undefined;
           const text = typeof item["text"] === "string" ? item["text"].slice(0, 6000) : undefined;
           const preview = typeof item["preview"] === "string" ? item["preview"] : undefined;
@@ -55,6 +60,7 @@ function sanitizeMessage(raw: unknown): Message | null {
             kind,
             label: typeof item["label"] === "string" ? item["label"] : "Step",
             status: status === "error" ? "error" : "done",
+            ...(tool ? { tool } : {}),
             ...(detail ? { detail } : {}),
             ...(ms !== undefined ? { ms } : {}),
             ...(text ? { text } : {}),
@@ -64,12 +70,15 @@ function sanitizeMessage(raw: unknown): Message | null {
         .filter((step): step is TraceStep => !!step)
     : [];
   const error = typeof record["error"] === "string" ? record["error"] : undefined;
+  const feedback =
+    record["feedback"] === "up" ? "up" : record["feedback"] === "down" ? "down" : undefined;
   return {
     id: typeof record["id"] === "string" ? record["id"] : uid(),
     role,
     content,
     steps,
     ...(error ? { error } : {}),
+    ...(feedback ? { feedback } : {}),
   };
 }
 

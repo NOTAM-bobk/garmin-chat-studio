@@ -33,6 +33,7 @@ export type ToolSpec = {
 type PuterGlobal = {
   ai: {
     chat: (m: unknown, o?: Record<string, unknown>) => Promise<unknown>;
+    listModels?: (provider?: string) => Promise<unknown>;
   };
   auth: {
     isSignedIn: () => boolean;
@@ -71,6 +72,32 @@ export function loadPuter(): Promise<PuterGlobal> {
     document.head.appendChild(script);
   });
   return loading;
+}
+
+/**
+ * Live model catalogue from Puter. Returns [] when the SDK or the call is
+ * unavailable so callers can fall back to the curated list.
+ */
+export async function listPuterModels(): Promise<
+  { id: string; name?: string; provider?: string }[]
+> {
+  try {
+    const puter = await loadPuter();
+    if (!puter.ai.listModels) return [];
+    const raw = await puter.ai.listModels();
+    if (!Array.isArray(raw)) return [];
+    return raw.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const record = entry as Record<string, unknown>;
+      const id = typeof record["id"] === "string" ? record["id"] : "";
+      if (!id) return [];
+      const name = typeof record["name"] === "string" ? record["name"] : undefined;
+      const provider = typeof record["provider"] === "string" ? record["provider"] : undefined;
+      return [{ id, ...(name ? { name } : {}), ...(provider ? { provider } : {}) }];
+    });
+  } catch {
+    return [];
+  }
 }
 
 /** Make sure a (temporary) Puter user exists. Must be called from a click/keypress. */

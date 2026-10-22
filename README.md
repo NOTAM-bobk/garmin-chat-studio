@@ -5,8 +5,13 @@ the hosted [MissingMCP Garmin server](https://missingmcp.com/garmin) over MCP, s
 and every tool it is reading in real time, and keeps the Garmin token on the server.
 
 - **Garmin in the chat** — sleep, HRV, Body Battery, readiness, activities, load, workouts.
-- **Visible work** — an expandable trace streams the model's reasoning and each tool call
-  ("Reading sleep · Oct 12 → Oct 19") with timing and payload size.
+- **Visible work** — the model's reasoning streams in as faint inline text, and every Garmin tool
+  it touches is listed by name ("get_sleep_summary_range") with live status and timing.
+- **Charts on request** — the assistant can answer with a line, bar or area chart by emitting a
+  validated ```chart block, rendered with recharts from the numbers it actually retrieved.
+- **Tone presets** — Coach, Analyst, Explain and Straight talk, saved in this browser.
+- **Model picker** — curated models first, then Puter's live catalogue via `puter.ai.listModels()`,
+  plus copy / regenerate / thumbs actions under every answer.
 - **No AI key required** — inference runs through [Puter.js](https://developer.puter.com) with a
   temporary guest user, so visitors never see a sign-in form.
 - **Server-held token** — the OAuth access token is sealed with AES-256-GCM inside an `httpOnly`

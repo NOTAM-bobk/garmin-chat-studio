@@ -171,6 +171,23 @@
     animation: shimmer 2.2s linear infinite;
   }
 
+  /* Reasoning is printed into the page, not boxed: faint text with a fade. */
+  .thinking-layer {
+    font-size: 0.79rem;
+    line-height: 1.7;
+    color: color-mix(in oklab, var(--color-muted-foreground) 66%, transparent);
+    white-space: pre-wrap;
+    overflow: hidden;
+    max-height: 11rem;
+    mask-image: linear-gradient(to bottom, black 62%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 62%, transparent 100%);
+  }
+
+  .thinking-layer.is-live {
+    max-height: 15rem;
+    color: color-mix(in oklab, var(--color-muted-foreground) 80%, transparent);
+  }
+
   .prose-chat {
     font-size: 0.945rem;
     line-height: 1.72;
@@ -271,16 +288,6 @@
     border-left: 2px solid var(--color-brand);
     padding-left: 0.9em;
     color: var(--color-muted-foreground);
-  }
-}
-
-@keyframes dot {
-  0%,
-  100% {
-    opacity: 0.2;
-  }
-  50% {
-    opacity: 1;
   }
 }
 

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -14,8 +15,12 @@ import {
   Moon,
   PanelLeft,
   Plug,
+  RotateCcw,
+  SlidersHorizontal,
   Square,
   SquarePen,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   TriangleAlert,
   Unplug,
@@ -23,8 +28,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { AgentTrace } from "@/components/chat/AgentTrace";
+import { Thinking, ToolActivity } from "@/components/chat/AgentTrace";
+import { ChatChart } from "@/components/chat/ChatChart";
 import { Toaster } from "@/components/ui/sonner";
+import { parseChartSpec } from "@/lib/chart";
 import {
   describeTool,
   formatBytes,
@@ -34,15 +41,20 @@ import {
   type ToolResult,
 } from "@/lib/garmin";
 import { loadChats, saveChats, uid, type Chat, type Message, type TraceStep } from "@/lib/chat";
+import {
+  CURATED_MODELS,
+  DEFAULT_TONE,
+  TONES,
+  mergeModels,
+  toneById,
+  type ModelOption,
+  type ToneId,
+} from "@/lib/models";
 import { cn } from "@/lib/utils";
-import { loadPuter, runRound, type AgentMessage } from "@/lib/puter";
+import { listPuterModels, loadPuter, runRound, type AgentMessage } from "@/lib/puter";
 
-const MODELS = [
-  { id: "gpt-5.4-nano", label: "GPT-5.4 nano", note: "fast" },
-  { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", note: "balanced" },
-  { id: "gpt-5.5", label: "GPT-5.5", note: "deep" },
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6", note: "careful" },
-];
+const TONE_KEY = "garmin-chat:tone";
+const FENCE = "```";
 
 const SUGGESTIONS = [
   {
@@ -69,23 +81,43 @@ const SUGGESTIONS = [
 
 const MAX_TOOL_ROUNDS = 5;
 
-function systemPrompt(status: GarminStatus | null, toolCount: number): string {
-  const today = new Date().toISOString().slice(0, 10);
+function systemPrompt(status: GarminStatus | null, toolCount: number, toneId: ToneId): string {
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
+  const tone = toneById(toneId).prompt;
   const connection = status?.connected
     ? `The user's Garmin Connect account is connected with ${toolCount} tools available.`
     : "The user's Garmin account is NOT connected, so you cannot read their data. Tell them to press Connect Garmin, then continue helping with general training questions.";
 
-  return `You are Garmin Chat, a training analyst with live read access to the user's Garmin Connect account.
-Today is ${today}. ${connection}
+  return `You are Garmin Chat, a training analyst with live read access to the user's Garmin Connect account through MCP tools.
+Today is ${weekday}, ${today}. ${connection}
 
-Rules:
-- When a question depends on the user's own metrics, call a tool before answering. Never invent numbers, activity names, or dates.
-- Turn relative dates ("this week", "last night") into explicit YYYY-MM-DD ranges, ending today.
-- Prefer summary tools; only pull time series when the detail matters.
-- Cross-check signals (sleep, HRV, resting HR, load, readiness) before recommending a change.
-- Answer in tight markdown: the finding first, the evidence behind it, then one clear next step. Keep it under 200 words unless asked for a plan.
-- You may create workouts or schedule them when asked. Say what you scheduled.
-- If data is missing, say so plainly instead of guessing. This is not medical advice.`;
+${tone}
+
+How to answer:
+- Ground every claim about the user in tool output. Call a tool before answering questions about their metrics, and never invent numbers, dates, activity names or workouts.
+- Plan the lookup: cheapest summary first, then drill into the one metric that changes the answer. Skip tools whose data cannot affect the reply.
+- Turn relative dates into explicit YYYY-MM-DD ranges ending today.
+- Compare against the user's own baseline (7 or 30 days), not population averages, and quote the delta with numbers.
+- Cross-check related signals (sleep, HRV, resting HR, load, readiness) before recommending a change. If two signals disagree, name the conflict and say which one you trust.
+- When data is thin or a tool fails, say exactly what is missing and what you can still conclude.
+- Be decisive: one most likely explanation and one concrete next step, not a menu of maybes.
+- You may create and schedule workouts when asked. State exactly what you created.
+- This is training guidance, not medical advice. Keep any safety note to a single short line.
+
+Charts:
+- When a trend, comparison or distribution reads better as a chart, emit exactly one chart block and keep the prose around it to two sentences.
+- A chart block is a fenced code block tagged ${FENCE}chart containing one line of valid JSON:
+${FENCE}chart
+{"type":"line","title":"Sleep score","unit":"score","x":["Oct 12","Oct 13"],"series":[{"name":"Score","data":[72,80]}]}
+${FENCE}
+- "type" is line, bar or area. "x" holds 3-21 short labels; each series needs the same count of plain numbers; up to 3 series. Optional "unit" is a short label.
+- Only chart numbers you actually retrieved. Do not repeat the same values as a table, and never nest one code fence inside another.
+
+Style:
+- Markdown, short paragraphs. Finding first, evidence second, next step last. No preamble like "Sure" or "Here's".
+- Default under 200 words; go longer only for a plan or a deep dive.`;
 }
 
 function isAbort(error: unknown): boolean {
@@ -111,7 +143,9 @@ export function ChatApp() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
-  const [model, setModel] = useState<string>(MODELS[0]!.id);
+  const [model, setModel] = useState<string>(CURATED_MODELS[0]!.id);
+  const [models, setModels] = useState<ModelOption[]>(CURATED_MODELS);
+  const [tone, setTone] = useState<ToneId>(DEFAULT_TONE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mobileSidebar, setMobileSidebar] = useState(false);
@@ -131,16 +165,34 @@ export function ChatApp() {
   const connected = status?.connected ?? false;
   const activeChat = chats.find((chat) => chat.id === activeId) ?? null;
   const toolsAvailable = garminTools.length || status?.tools || 0;
+  const modelLabel = models.find((option) => option.id === model)?.label ?? model;
+  const toneLabel = TONES.find((option) => option.id === tone)?.label ?? tone;
 
   useEffect(() => {
     setChats(loadChats());
     setHydrated(true);
+    const savedTone = localStorage.getItem(TONE_KEY);
+    if (savedTone && TONES.some((option) => option.id === savedTone)) {
+      setTone(savedTone as ToneId);
+    }
     loadPuter().catch(() => undefined);
   }, []);
 
   useEffect(() => {
     if (hydrated) saveChats(chats);
   }, [chats, hydrated]);
+
+  // Pull Puter's live catalogue so the picker grows with what the SDK offers.
+  useEffect(() => {
+    let cancelled = false;
+    void listPuterModels().then((list) => {
+      if (cancelled || list.length === 0) return;
+      setModels(mergeModels(list));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const refreshTools = useCallback(async (): Promise<GarminTool[]> => {
     try {
@@ -259,6 +311,15 @@ export function ChatApp() {
     if (activeId === id) setActiveId(null);
   }
 
+  function chooseTone(next: ToneId) {
+    setTone(next);
+    try {
+      localStorage.setItem(TONE_KEY, next);
+    } catch {
+      // Private mode: the tone still applies for this session.
+    }
+  }
+
   function connectGarmin() {
     if (status && !status.configured) {
       toast.error("Garmin isn't configured", {
@@ -307,50 +368,14 @@ export function ChatApp() {
     };
   }
 
-  async function send(raw: string) {
-    const text = raw.trim();
-    if (!text || busy) return;
-
-    setError(null);
-    setInput("");
-    stickRef.current = true;
-
-    const userMessage: Message = { id: uid(), role: "user", content: text, steps: [] };
-    const assistantId = uid();
-    const assistantMessage: Message = {
-      id: assistantId,
-      role: "assistant",
-      content: "",
-      steps: [],
-    };
-
-    const priorMessages = activeChat?.messages ?? [];
-
-    const chatId = activeChat?.id ?? uid();
-    if (activeChat) {
-      setChats((previous) =>
-        previous.map((chat) =>
-          chat.id === chatId
-            ? {
-                ...chat,
-                messages: [...chat.messages, userMessage, assistantMessage],
-                updated: Date.now(),
-              }
-            : chat,
-        ),
-      );
-    } else {
-      setChats((previous) => [
-        {
-          id: chatId,
-          title: text.slice(0, 52),
-          messages: [userMessage, assistantMessage],
-          updated: Date.now(),
-        },
-        ...previous,
-      ]);
-      setActiveId(chatId);
-    }
+  /** Stream one assistant turn into an existing (empty) assistant message. */
+  async function runTurn(args: {
+    chatId: string;
+    assistantId: string;
+    /** History up to and including the user message being answered. */
+    prior: Message[];
+  }) {
+    const { chatId, assistantId, prior } = args;
 
     const patchMessage = (patch: (message: Message) => Message) => {
       setChats((previous) =>
@@ -394,11 +419,8 @@ export function ChatApp() {
     }
 
     const history: AgentMessage[] = [
-      { role: "system", content: systemPrompt(status, tools.length) },
-      ...priorMessages
-        .filter((message) => message.content.trim().length > 0)
-        .map((message) => ({ role: message.role, content: message.content })),
-      { role: "user", content: text },
+      { role: "system", content: systemPrompt(status, tools.length, tone) },
+      ...prior.map((message) => ({ role: message.role, content: message.content })),
     ];
 
     try {
@@ -433,7 +455,7 @@ export function ChatApp() {
                               step.id === thinkingId
                                 ? {
                                     ...step,
-                                    text: `${step.text ?? ""}${event.text}`.slice(0, 6000),
+                                    text: `${step.text ?? ""}${event.text}`.slice(0, 8000),
                                   }
                                 : step,
                             ),
@@ -461,6 +483,7 @@ export function ChatApp() {
               id: `tool-${event.call.id}`,
               kind: "tool",
               label,
+              tool: event.call.name,
               ...(detail ? { detail } : {}),
               status: "active",
             });
@@ -541,7 +564,6 @@ export function ChatApp() {
         setError(message);
         patchMessage((existing) => ({
           ...existing,
-          ...(existing.content ? {} : { content: "" }),
           error: message,
           steps: existing.steps.map((step) =>
             step.status === "active" ? { ...step, status: "error" } : step,
@@ -554,14 +576,102 @@ export function ChatApp() {
     }
   }
 
+  async function send(raw: string) {
+    const text = raw.trim();
+    if (!text || busy) return;
+
+    setError(null);
+    setInput("");
+    stickRef.current = true;
+
+    const userMessage: Message = { id: uid(), role: "user", content: text, steps: [] };
+    const assistantId = uid();
+    const assistantMessage: Message = {
+      id: assistantId,
+      role: "assistant",
+      content: "",
+      steps: [],
+    };
+
+    const prior = [...(activeChat?.messages ?? []), userMessage];
+    const chatId = activeChat?.id ?? uid();
+
+    if (activeChat) {
+      setChats((previous) =>
+        previous.map((chat) =>
+          chat.id === chatId
+            ? { ...chat, messages: [...prior, assistantMessage], updated: Date.now() }
+            : chat,
+        ),
+      );
+    } else {
+      setChats((previous) => [
+        {
+          id: chatId,
+          title: text.slice(0, 52),
+          messages: [...prior, assistantMessage],
+          updated: Date.now(),
+        },
+        ...previous,
+      ]);
+      setActiveId(chatId);
+    }
+
+    await runTurn({ chatId, assistantId, prior });
+  }
+
+  async function regenerate(chatId: string, messageId: string) {
+    if (busy) return;
+    const chat = chats.find((entry) => entry.id === chatId);
+    if (!chat) return;
+    const index = chat.messages.findIndex((message) => message.id === messageId);
+    if (index < 1) return;
+    const prior = chat.messages.slice(0, index);
+    if (prior[prior.length - 1]?.role !== "user") return;
+
+    const assistantId = uid();
+    setError(null);
+    stickRef.current = true;
+    setChats((previous) =>
+      previous.map((entry) =>
+        entry.id === chatId
+          ? {
+              ...entry,
+              updated: Date.now(),
+              messages: [...prior, { id: assistantId, role: "assistant", content: "", steps: [] }],
+            }
+          : entry,
+      ),
+    );
+
+    await runTurn({ chatId, assistantId, prior });
+  }
+
+  function setFeedback(chatId: string, messageId: string, value: "up" | "down") {
+    setChats((previous) =>
+      previous.map((chat) =>
+        chat.id !== chatId
+          ? chat
+          : {
+              ...chat,
+              messages: chat.messages.map((message) => {
+                if (message.id !== messageId) return message;
+                const next: Message = { ...message };
+                delete next.feedback;
+                if (message.feedback !== value) next.feedback = value;
+                return next;
+              }),
+            },
+      ),
+    );
+  }
+
   const liveStep = busy
     ? [...(activeChat?.messages ?? [])]
         .reverse()
         .flatMap((message) => [...message.steps].reverse())
         .find((step) => step.status === "active")
     : undefined;
-
-  const modelLabel = MODELS.find((option) => option.id === model)?.label ?? model;
 
   const sendButton = busy ? (
     <button
@@ -625,17 +735,18 @@ export function ChatApp() {
         )}
 
         <label className="relative ml-auto inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-          {modelLabel}
+          <SlidersHorizontal className="size-3" />
+          {toneLabel}
           <ChevronDown className="size-3" />
           <select
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-            aria-label="Model"
+            value={tone}
+            onChange={(event) => chooseTone(event.target.value as ToneId)}
+            aria-label="Answer tone"
             className="absolute inset-0 cursor-pointer opacity-0"
           >
-            {MODELS.map((option) => (
+            {TONES.map((option) => (
               <option key={option.id} value={option.id}>
-                {option.label} — {option.note}
+                {option.label}
               </option>
             ))}
           </select>
@@ -789,9 +900,10 @@ export function ChatApp() {
               aria-label="Model"
               className="absolute inset-0 cursor-pointer opacity-0"
             >
-              {MODELS.map((option) => (
+              {models.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {option.label} — {option.note}
+                  {option.label}
+                  {option.note ? ` — ${option.note}` : ""}
                 </option>
               ))}
             </select>
@@ -887,11 +999,19 @@ export function ChatApp() {
           <>
             <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto w-full max-w-3xl space-y-7 px-4 py-6">
-                {activeChat.messages.map((message) => (
+                {activeChat.messages.map((message, index) => (
                   <MessageBubble
                     key={message.id}
                     message={message}
                     running={busy && message.id === activeChat.messages.at(-1)?.id}
+                    canRegenerate={
+                      !busy &&
+                      message.role === "assistant" &&
+                      index === activeChat.messages.length - 1 &&
+                      activeChat.messages[index - 1]?.role === "user"
+                    }
+                    onRegenerate={() => void regenerate(activeChat.id, message.id)}
+                    onFeedback={(value) => setFeedback(activeChat.id, message.id, value)}
                   />
                 ))}
                 <div ref={endRef} className="h-2" />
@@ -941,8 +1061,52 @@ export function ChatApp() {
   );
 }
 
-function MessageBubble({ message, running }: { message: Message; running: boolean }) {
+const markdownComponents: Components = {
+  pre({ children }) {
+    const first = Array.isArray(children) ? children[0] : children;
+    const className = (first as { props?: { className?: unknown } } | null)?.props?.className;
+    if (typeof className === "string" && className.includes("language-chart")) {
+      return <>{children}</>;
+    }
+    return <pre>{children}</pre>;
+  },
+  code({ className, children }) {
+    if (typeof className === "string" && className.includes("language-chart")) {
+      const raw = String(children ?? "").trim();
+      const spec = parseChartSpec(raw);
+      if (spec) return <ChatChart spec={spec} />;
+      return (
+        <div className="my-3 overflow-x-auto whitespace-pre rounded-xl border border-border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+          {raw}
+        </div>
+      );
+    }
+    return <code className={className}>{children}</code>;
+  },
+};
+
+function MessageBubble({
+  message,
+  running,
+  canRegenerate,
+  onRegenerate,
+  onFeedback,
+}: {
+  message: Message;
+  running: boolean;
+  canRegenerate: boolean;
+  onRegenerate: () => void;
+  onFeedback: (value: "up" | "down") => void;
+}) {
   const [copied, setCopied] = useState(false);
+  const markdown = useMemo(
+    () => (
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        {message.content}
+      </ReactMarkdown>
+    ),
+    [message.content],
+  );
 
   if (message.role === "user") {
     return (
@@ -956,9 +1120,53 @@ function MessageBubble({ message, running }: { message: Message; running: boolea
 
   const empty = !message.content && message.steps.length === 0 && !message.error;
 
+  const actions = [
+    {
+      key: "copy",
+      label: copied ? "Copied" : "Copy answer",
+      icon: copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />,
+      onClick: () => {
+        void navigator.clipboard
+          ?.writeText(message.content)
+          .then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          })
+          .catch(() => undefined);
+      },
+      active: copied,
+    },
+    ...(canRegenerate
+      ? [
+          {
+            key: "regenerate",
+            label: "Regenerate answer",
+            icon: <RotateCcw className="size-3.5" />,
+            onClick: onRegenerate,
+            active: false,
+          },
+        ]
+      : []),
+    {
+      key: "up",
+      label: "Good answer",
+      icon: <ThumbsUp className="size-3.5" />,
+      onClick: () => onFeedback("up"),
+      active: message.feedback === "up",
+    },
+    {
+      key: "down",
+      label: "Bad answer",
+      icon: <ThumbsDown className="size-3.5" />,
+      onClick: () => onFeedback("down"),
+      active: message.feedback === "down",
+    },
+  ];
+
   return (
     <div className="group">
-      <AgentTrace steps={message.steps} running={running} />
+      <Thinking steps={message.steps} running={running} />
+      <ToolActivity steps={message.steps} />
 
       {empty && running && (
         <div className="flex items-center gap-1.5 py-1" aria-label="Thinking">
@@ -968,11 +1176,7 @@ function MessageBubble({ message, running }: { message: Message; running: boolea
         </div>
       )}
 
-      {message.content && (
-        <div className="prose-chat">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-        </div>
-      )}
+      {message.content && <div className="prose-chat">{markdown}</div>}
 
       {message.error && (
         <div className="mt-2 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-[12.5px] text-destructive">
@@ -981,23 +1185,23 @@ function MessageBubble({ message, running }: { message: Message; running: boolea
         </div>
       )}
 
-      {!running && message.content && (
-        <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          <button
-            onClick={() => {
-              void navigator.clipboard
-                ?.writeText(message.content)
-                .then(() => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                })
-                .catch(() => undefined);
-            }}
-            aria-label="Copy answer"
-            className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          </button>
+      {!running && (
+        <div className="mt-1.5 flex items-center gap-0.5 text-muted-foreground transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+          {actions.map((action) => (
+            <button
+              key={action.key}
+              onClick={action.onClick}
+              aria-label={action.label}
+              aria-pressed={action.active || undefined}
+              title={action.label}
+              className={cn(
+                "grid size-7 place-items-center rounded-md transition-colors hover:bg-accent hover:text-foreground",
+                action.active && "text-foreground",
+              )}
+            >
+              {action.icon}
+            </button>
+          ))}
         </div>
       )}
     </div>

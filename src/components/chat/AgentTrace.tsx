@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { AlertCircle, Check, ChevronDown, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { AlertCircle, Check, Loader2 } from "lucide-react";
 
 import type { TraceStep } from "@/lib/chat";
 import { cn } from "@/lib/utils";
@@ -10,129 +10,86 @@ function formatMs(ms: number | undefined): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function totalMs(steps: TraceStep[]): number {
-  return steps.reduce((sum, step) => sum + (step.ms ?? 0), 0);
-}
+/**
+ * The model's reasoning, printed as faint background text instead of a panel.
+ * It streams in live and collapses to three lines once the answer lands.
+ */
+export function Thinking({ steps, running }: { steps: TraceStep[]; running: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const text = steps
+    .filter((step) => step.kind === "thinking")
+    .map((step) => (step.text ?? "").trim())
+    .filter(Boolean)
+    .join("\n\n");
 
-function StepIcon({ step }: { step: TraceStep }) {
-  if (step.status === "active") {
-    return <Loader2 className="size-3 animate-spin text-muted-foreground" strokeWidth={2.2} />;
-  }
-  if (step.status === "error") {
-    return <AlertCircle className="size-3 text-destructive" strokeWidth={2.2} />;
-  }
-  return <Check className="size-3 text-muted-foreground" strokeWidth={2.4} />;
-}
+  if (!text) return null;
 
-export function AgentTrace({ steps, running }: { steps: TraceStep[]; running: boolean }) {
-  const [open, setOpen] = useState(running);
-
-  useEffect(() => {
-    setOpen(running);
-  }, [running]);
-
-  if (steps.length === 0) return null;
-
-  const active = steps.find((step) => step.status === "active");
-  const errored = steps.some((step) => step.status === "error");
-  const elapsed = totalMs(steps);
-  const tools = steps.filter((step) => step.kind === "tool").length;
-
-  const headline = active
-    ? active.kind === "thinking"
-      ? active.label
-      : `${active.label}${active.detail ? ` · ${active.detail}` : ""}`
-    : errored
-      ? "Finished with a problem"
-      : `Thought for ${formatMs(elapsed) || "a moment"}${
-          tools ? ` · ${tools} ${tools === 1 ? "lookup" : "lookups"}` : ""
-        }`;
+  const clamped = !running && !expanded;
 
   return (
-    <div className="mb-2">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        className="-ml-2 flex max-w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left text-[13px] transition-colors hover:bg-accent/70"
+    <div className="mb-1.5">
+      <p
+        className={cn("thinking-layer", running && "is-live", clamped && "line-clamp-3")}
+        aria-live="polite"
       >
+        {text}
+      </p>
+      {!running && text.length > 180 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-0.5 text-[10.5px] text-muted-foreground/70 transition-colors hover:text-muted-foreground"
+        >
+          {expanded ? "Hide reasoning" : "Show reasoning"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The Garmin tools this answer actually touched, with live status. */
+export function ToolActivity({ steps }: { steps: TraceStep[] }) {
+  const tools = steps.filter((step) => step.kind === "tool");
+  if (tools.length === 0) return null;
+
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-1.5">
+      <span className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground/60">
+        Tools
+      </span>
+      {tools.map((step) => (
         <span
+          key={step.id}
+          title={[step.label, step.detail, step.preview].filter(Boolean).join(" · ")}
           className={cn(
-            "min-w-0 truncate",
-            running ? "text-muted-foreground shimmer-text" : "text-muted-foreground",
+            "inline-flex max-w-full items-center gap-1.5 rounded-md border px-1.5 py-[3px]",
+            step.status === "error"
+              ? "border-destructive/30 bg-destructive/5 text-destructive"
+              : "border-border/80 bg-muted/40 text-muted-foreground",
           )}
         >
-          {headline}
-        </span>
-        <ChevronDown
-          className={cn(
-            "size-3.5 shrink-0 text-muted-foreground/70 transition-transform",
-            open ? "rotate-180" : "rotate-0",
+          {step.status === "active" ? (
+            <Loader2 className="size-2.5 shrink-0 animate-spin" strokeWidth={2.4} />
+          ) : step.status === "error" ? (
+            <AlertCircle className="size-2.5 shrink-0" strokeWidth={2.4} />
+          ) : (
+            <Check className="size-2.5 shrink-0" strokeWidth={2.6} />
           )}
-        />
-      </button>
-
-      {open && (
-        <ol className="mt-1 ml-1 space-y-2 border-l border-border/80 pl-3">
-          {steps.map((step) => (
-            <li key={step.id} className="min-w-0">
-              <div className="flex items-start gap-2">
-                <span className="mt-[3px] grid size-3 shrink-0 place-items-center">
-                  <StepIcon step={step} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2">
-                    <span
-                      className={cn(
-                        "min-w-0 text-[12.5px] leading-relaxed",
-                        step.status === "active"
-                          ? "text-foreground"
-                          : step.status === "error"
-                            ? "text-destructive"
-                            : "text-muted-foreground",
-                      )}
-                    >
-                      {step.label}
-                      {step.detail && (
-                        <span className="text-muted-foreground/80"> · {step.detail}</span>
-                      )}
-                    </span>
-                    {step.ms !== undefined && step.ms > 250 && (
-                      <span className="ml-auto shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
-                        {formatMs(step.ms)}
-                      </span>
-                    )}
-                  </div>
-
-                  {step.kind === "thinking" && step.text && (
-                    <p
-                      className={cn(
-                        "mt-0.5 whitespace-pre-wrap text-[12.5px] leading-relaxed text-muted-foreground/90",
-                        step.status === "active" ? "max-h-44 overflow-y-auto" : "line-clamp-4",
-                      )}
-                    >
-                      {step.text}
-                    </p>
-                  )}
-
-                  {step.kind === "tool" && step.preview && (
-                    <p
-                      className={cn(
-                        "mt-0.5 truncate font-mono text-[10.5px]",
-                        step.status === "error"
-                          ? "text-destructive/90"
-                          : "text-muted-foreground/60",
-                      )}
-                    >
-                      {step.preview}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
+          <span
+            className={cn(
+              "truncate font-mono text-[10.5px]",
+              step.status === "active" && "shimmer-text",
+            )}
+          >
+            {step.tool ?? step.label}
+          </span>
+          {step.ms !== undefined && step.ms > 250 && (
+            <span className="shrink-0 font-mono text-[9.5px] text-muted-foreground/50">
+              {formatMs(step.ms)}
+            </span>
+          )}
+        </span>
+      ))}
     </div>
   );
 }

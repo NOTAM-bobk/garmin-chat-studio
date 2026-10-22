@@ -5,17 +5,17 @@ import { ChatApp } from "@/components/chat/ChatApp";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Garmin Studio — your training, in conversation" },
+      { title: "Garmin Chat" },
       {
         name: "description",
         content:
-          "Read your Garmin sleep, recovery and training data in a clean chat. Every tool call and thought is shown as it happens.",
+          "Chat with your Garmin data — sleep, recovery, load and workouts, with every lookup shown as it happens.",
       },
-      { property: "og:title", content: "Garmin Studio — your training, in conversation" },
+      { property: "og:title", content: "Garmin Chat" },
       {
         property: "og:description",
         content:
-          "Read your Garmin sleep, recovery and training data in a clean chat. Every tool call and thought is shown as it happens.",
+          "Chat with your Garmin data — sleep, recovery, load and workouts, with every lookup shown as it happens.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

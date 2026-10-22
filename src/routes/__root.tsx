@@ -78,17 +78,17 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Garmin Studio" },
+      { title: "Garmin Chat" },
       {
         name: "description",
         content:
-          "A training analyst with live read access to your Garmin Connect data — and a visible chain of thought.",
+          "A clean chat with live read access to your Garmin Connect data — and a visible chain of thought.",
       },
-      { property: "og:title", content: "Garmin Studio" },
+      { property: "og:title", content: "Garmin Chat" },
       {
         property: "og:description",
         content:
-          "A training analyst with live read access to your Garmin Connect data — and a visible chain of thought.",
+          "A clean chat with live read access to your Garmin Connect data — and a visible chain of thought.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

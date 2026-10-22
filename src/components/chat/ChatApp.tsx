@@ -9,14 +9,11 @@ import {
   ChevronDown,
   Copy,
   Dumbbell,
-  HeartPulse,
   Loader2,
   Menu,
   Moon,
   PanelLeft,
   Plug,
-  RefreshCw,
-  ShieldCheck,
   Square,
   SquarePen,
   Trash2,
@@ -36,15 +33,7 @@ import {
   type GarminTool,
   type ToolResult,
 } from "@/lib/garmin";
-import {
-  loadChats,
-  relativeTime,
-  saveChats,
-  uid,
-  type Chat,
-  type Message,
-  type TraceStep,
-} from "@/lib/chat";
+import { loadChats, saveChats, uid, type Chat, type Message, type TraceStep } from "@/lib/chat";
 import { cn } from "@/lib/utils";
 import { loadPuter, runRound, type AgentMessage } from "@/lib/puter";
 
@@ -86,7 +75,7 @@ function systemPrompt(status: GarminStatus | null, toolCount: number): string {
     ? `The user's Garmin Connect account is connected with ${toolCount} tools available.`
     : "The user's Garmin account is NOT connected, so you cannot read their data. Tell them to press Connect Garmin, then continue helping with general training questions.";
 
-  return `You are Garmin Studio, a training analyst with live read access to the user's Garmin Connect account.
+  return `You are Garmin Chat, a training analyst with live read access to the user's Garmin Connect account.
 Today is ${today}. ${connection}
 
 Rules:
@@ -572,13 +561,35 @@ export function ChatApp() {
         .find((step) => step.status === "active")
     : undefined;
 
+  const modelLabel = MODELS.find((option) => option.id === model)?.label ?? model;
+
+  const sendButton = busy ? (
+    <button
+      type="button"
+      onClick={() => abortRef.current?.abort()}
+      aria-label="Stop generating"
+      className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95"
+    >
+      <Square className="size-2.5 fill-current" />
+    </button>
+  ) : (
+    <button
+      type="submit"
+      disabled={!input.trim()}
+      aria-label="Send message"
+      className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-transform enabled:hover:opacity-90 disabled:opacity-20 active:scale-95"
+    >
+      <ArrowUp className="size-4" strokeWidth={2.5} />
+    </button>
+  );
+
   const composer = (
     <form
       onSubmit={(event) => {
         event.preventDefault();
         void send(input);
       }}
-      className="rounded-[26px] border border-border bg-card p-2.5 shadow-composer transition-shadow focus-within:border-foreground/25 focus-within:shadow-composer-focus"
+      className="rounded-[26px] border border-border bg-card p-2 shadow-composer transition-shadow focus-within:border-foreground/15 focus-within:shadow-composer-focus"
     >
       <textarea
         ref={textareaRef}
@@ -591,25 +602,22 @@ export function ChatApp() {
             void send(input);
           }
         }}
-        placeholder={connected ? "Ask about your sleep, training load, recovery…" : "Ask anything"}
+        placeholder={connected ? "Ask about your training" : "Ask anything"}
         aria-label="Message"
-        className="max-h-[220px] w-full resize-none bg-transparent px-3 py-2.5 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground/80"
+        className="max-h-[220px] w-full resize-none bg-transparent px-3 pb-1 pt-2.5 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground"
       />
-      <div className="flex items-center gap-1.5 px-1 pt-1">
+      <div className="flex items-center gap-1 px-0.5">
         {connected ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-2.5 py-1 text-[11.5px] font-medium text-brand-ink">
-            <span className="relative flex size-1.5">
-              <span className="absolute inline-flex size-full animate-ping rounded-full bg-brand opacity-60" />
-              <span className="relative inline-flex size-1.5 rounded-full bg-brand" />
-            </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11.5px] text-muted-foreground">
+            <span className="size-1.5 rounded-full bg-emerald-500" />
             Garmin live
-            <span className="text-brand-ink/60">· {toolsAvailable}</span>
+            <span className="text-muted-foreground/70">· {toolsAvailable} tools</span>
           </span>
         ) : (
           <button
             type="button"
             onClick={connectGarmin}
-            className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[11.5px] font-medium text-muted-foreground transition-colors hover:border-brand/40 hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <Plug className="size-3" />
             Connect Garmin
@@ -617,7 +625,7 @@ export function ChatApp() {
         )}
 
         <label className="relative ml-auto inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-          {MODELS.find((option) => option.id === model)?.label ?? model}
+          {modelLabel}
           <ChevronDown className="size-3" />
           <select
             value={model}
@@ -633,25 +641,7 @@ export function ChatApp() {
           </select>
         </label>
 
-        {busy ? (
-          <button
-            type="button"
-            onClick={() => abortRef.current?.abort()}
-            aria-label="Stop generating"
-            className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95"
-          >
-            <Square className="size-2.5 fill-current" />
-          </button>
-        ) : (
-          <button
-            type="submit"
-            disabled={!input.trim()}
-            aria-label="Send message"
-            className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-transform enabled:hover:opacity-90 disabled:opacity-20 active:scale-95"
-          >
-            <ArrowUp className="size-4" strokeWidth={2.5} />
-          </button>
-        )}
+        {sendButton}
       </div>
     </form>
   );
@@ -662,61 +652,46 @@ export function ChatApp() {
 
       {mobileSidebar && (
         <div
-          className="fixed inset-0 z-30 bg-foreground/25 backdrop-blur-[2px] md:hidden"
+          className="fixed inset-0 z-30 bg-foreground/25 md:hidden"
           onClick={() => setMobileSidebar(false)}
         />
       )}
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex w-[264px] flex-col border-r border-sidebar-border bg-sidebar transition-transform duration-200 md:static md:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 flex w-[260px] flex-col bg-sidebar transition-transform duration-200 md:static md:translate-x-0",
           mobileSidebar ? "translate-x-0" : "-translate-x-full",
           sidebarOpen ? "md:flex" : "md:hidden",
         )}
       >
-        <div className="flex items-center gap-2 px-3 pb-2 pt-3">
-          <div className="grid size-8 place-items-center rounded-[10px] bg-primary text-primary-foreground">
-            <Activity className="size-4" strokeWidth={2.4} />
-          </div>
-          <div className="min-w-0 flex-1 leading-tight">
-            <p className="truncate text-[13px] font-semibold tracking-tight">Garmin Studio</p>
-            <p className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
-              MCP training analyst
-            </p>
-          </div>
+        <div className="flex items-center justify-between px-2 py-2">
           <button
             onClick={() => {
               setMobileSidebar(false);
               setSidebarOpen(false);
             }}
             aria-label="Close sidebar"
-            className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+            className="grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
           >
-            <PanelLeft className="size-4" />
+            <PanelLeft className="size-[18px]" />
           </button>
-        </div>
-
-        <div className="px-2 pb-2 pt-1">
           <button
             onClick={newChat}
-            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors hover:bg-sidebar-accent"
+            aria-label="New chat"
+            className="grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
           >
-            <SquarePen className="size-4" />
-            New thread
-            <span className="ml-auto font-mono text-[9.5px] text-muted-foreground">⌘K</span>
+            <SquarePen className="size-[18px]" />
           </button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
           {chats.length === 0 ? (
-            <p className="px-3 py-6 text-[12px] leading-relaxed text-muted-foreground">
-              No threads yet. Ask a question to start one.
+            <p className="px-3 py-6 text-[13px] leading-relaxed text-muted-foreground">
+              No chats yet.
             </p>
           ) : (
             <>
-              <p className="px-3 pb-1 pt-3 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
-                Recent
-              </p>
+              <p className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground">Chats</p>
               {chats.map((chat) => (
                 <div
                   key={chat.id}
@@ -730,17 +705,14 @@ export function ChatApp() {
                       setActiveId(chat.id);
                       setMobileSidebar(false);
                     }}
-                    className="min-w-0 flex-1 px-3 py-2 text-left"
+                    className="min-w-0 flex-1 truncate px-3 py-2 text-left text-[13.5px]"
                   >
-                    <span className="block truncate text-[13px]">{chat.title || "New thread"}</span>
-                    <span className="block truncate text-[10.5px] text-muted-foreground">
-                      {relativeTime(chat.updated)}
-                    </span>
+                    {chat.title || "New chat"}
                   </button>
                   <button
                     onClick={() => deleteChat(chat.id)}
                     aria-label={`Delete ${chat.title}`}
-                    className="mr-1 grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                    className="mr-1 grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
                   >
                     <Trash2 className="size-3.5" />
                   </button>
@@ -750,236 +722,125 @@ export function ChatApp() {
           )}
         </div>
 
-        <div className="border-t border-sidebar-border p-2.5">
-          <div className="rounded-xl border border-border/70 bg-card/70 p-2.5">
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "size-1.5 shrink-0 rounded-full",
-                  connected ? "bg-brand" : "bg-muted-foreground/40",
-                )}
-              />
-              <p className="min-w-0 flex-1 truncate text-[12px] font-medium">
-                {connected ? "Garmin connected" : "Garmin not connected"}
-              </p>
-              {connected ? (
-                <button
-                  onClick={() => void disconnectGarmin()}
-                  aria-label="Disconnect Garmin"
-                  className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                  <Unplug className="size-3.5" />
-                </button>
-              ) : (
-                <button
-                  onClick={connectGarmin}
-                  className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-brand-ink hover:bg-brand-soft"
-                >
-                  Connect
-                </button>
-              )}
-            </div>
-            <p className="mt-0.5 text-[10.5px] leading-relaxed text-muted-foreground">
-              {connected
-                ? `${toolsAvailable} tools · token stays on the server`
-                : "Read your Garmin data inside the chat."}
-            </p>
-          </div>
-          <a
-            href="https://developer.puter.com"
-            target="_blank"
-            rel="noreferrer"
-            className="mt-2 block px-1 font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground/70 hover:text-muted-foreground"
-          >
-            Powered by Puter
-          </a>
-        </div>
-      </aside>
-
-      <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-1.5 border-b border-border/60 px-2.5">
-          <button
-            onClick={() => setMobileSidebar(true)}
-            aria-label="Open sidebar"
-            className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent md:hidden"
-          >
-            <Menu className="size-4" />
-          </button>
-          {!sidebarOpen && (
-            <button
-              onClick={() => setSidebarOpen(true)}
-              aria-label="Open sidebar"
-              className="hidden size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent md:grid"
-            >
-              <PanelLeft className="size-4" />
-            </button>
-          )}
-          <div className="min-w-0 px-1">
-            <p className="truncate text-[13.5px] font-medium">
-              {activeChat?.title || "New thread"}
-            </p>
-            <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
-              {connected ? "grounded in Garmin" : "general training chat"}
-            </p>
-          </div>
-
+        <div className="border-t border-sidebar-border/80 p-2">
           {connected ? (
-            <div
-              className="ml-auto hidden items-center gap-1.5 rounded-full border border-brand/30 bg-brand-soft px-2.5 py-1 text-[11px] font-medium text-brand-ink sm:inline-flex"
-              title="Garmin tools are live for this session"
-            >
-              <span className="size-1.5 rounded-full bg-brand" />
-              {toolsAvailable} tools live
+            <div className="group flex items-center gap-2 rounded-lg px-2 py-1.5">
+              <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
+              <span className="min-w-0 flex-1 truncate text-[12.5px]">Garmin connected</span>
+              <span className="shrink-0 text-[11px] text-muted-foreground">{toolsAvailable}</span>
+              <button
+                onClick={() => void disconnectGarmin()}
+                aria-label="Disconnect Garmin"
+                className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+              >
+                <Unplug className="size-3.5" />
+              </button>
             </div>
           ) : (
             <button
               onClick={connectGarmin}
-              className="ml-auto hidden items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
             >
-              <Plug className="size-3" />
+              <Plug className="size-3.5" />
               Connect Garmin
             </button>
           )}
+        </div>
+      </aside>
+
+      <main className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center gap-1 px-2 sm:px-3">
           <button
-            onClick={newChat}
-            aria-label="New thread"
-            className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-accent"
+            onClick={() => setMobileSidebar(true)}
+            aria-label="Open sidebar"
+            className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-accent md:hidden"
           >
-            <SquarePen className="size-4" />
+            <Menu className="size-5" />
           </button>
+
+          {!sidebarOpen && (
+            <>
+              <button
+                onClick={() => setSidebarOpen(true)}
+                aria-label="Open sidebar"
+                className="hidden size-9 place-items-center rounded-lg text-muted-foreground hover:bg-accent md:grid"
+              >
+                <PanelLeft className="size-5" />
+              </button>
+              <button
+                onClick={newChat}
+                aria-label="New chat"
+                className="hidden size-9 place-items-center rounded-lg text-muted-foreground hover:bg-accent md:grid"
+              >
+                <SquarePen className="size-5" />
+              </button>
+            </>
+          )}
+
+          <label className="relative ml-1 flex min-w-0 cursor-pointer items-center gap-1 rounded-lg px-2 py-1.5 transition-colors hover:bg-accent">
+            <span className="truncate text-[14.5px] font-medium">Garmin Chat</span>
+            <span className="hidden truncate text-[14.5px] text-muted-foreground sm:inline">
+              {modelLabel}
+            </span>
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+            <select
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              aria-label="Model"
+              className="absolute inset-0 cursor-pointer opacity-0"
+            >
+              {MODELS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label} — {option.note}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="ml-auto flex items-center gap-1">
+            {connected ? (
+              <span className="hidden items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[11.5px] text-muted-foreground sm:inline-flex">
+                <span className="size-1.5 rounded-full bg-emerald-500" />
+                Connected
+              </span>
+            ) : (
+              <button
+                onClick={connectGarmin}
+                className="hidden items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:inline-flex"
+              >
+                <Plug className="size-3" />
+                Connect Garmin
+              </button>
+            )}
+            <button
+              onClick={newChat}
+              aria-label="New chat"
+              className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-accent md:hidden"
+            >
+              <SquarePen className="size-5" />
+            </button>
+          </div>
         </header>
 
-        <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
-          {!activeChat ? (
-            <div className="relative mx-auto w-full max-w-3xl px-4 pb-8 pt-10 sm:pt-16">
-              <div
-                aria-hidden="true"
-                className="hero-grid pointer-events-none absolute inset-x-0 top-0 h-72"
-              />
+        {!activeChat ? (
+          <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 pb-16">
+            <h1 className="text-center text-[26px] font-medium tracking-tight sm:text-[30px]">
+              Ask me about your training
+            </h1>
+            <p className="mt-2 max-w-md text-center text-[13.5px] leading-relaxed text-muted-foreground">
+              {connected
+                ? `${toolsAvailable} Garmin tools are live. Sleep, recovery, load and workouts — read as we go.`
+                : "Connect Garmin to read your sleep, recovery and workouts inside the chat."}
+            </p>
 
-              <div className="relative">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-card px-2.5 py-1 font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
-                  <HeartPulse className="size-3 text-brand" />
-                  Garmin Connect · MCP
-                </span>
+            <div className="mt-6 w-full max-w-3xl">{composer}</div>
 
-                <h1 className="mt-5 text-[34px] font-medium leading-[1.06] tracking-[-0.035em] sm:text-[46px]">
-                  Your training,
-                  <br />
-                  <span className="text-brand-ink">in conversation.</span>
-                </h1>
-                <p className="mt-4 max-w-lg text-[14.5px] leading-relaxed text-muted-foreground">
-                  Sleep, recovery, load, workouts — read straight from your Garmin account. Every
-                  step the assistant takes is shown as it happens.
-                </p>
-
-                <div className="mt-7 rounded-2xl border border-border bg-card p-3.5 shadow-[0_1px_0_oklch(0_0_0/2%),0_18px_40px_-32px_oklch(0_0_0/28%)]">
-                  {connected ? (
-                    <div className="flex items-start gap-3">
-                      <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-ink">
-                        <ShieldCheck className="size-4" strokeWidth={2} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[13.5px] font-semibold">Garmin is connected</p>
-                        <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-                          {toolsAvailable} tools available. The access token is sealed in an
-                          httpOnly cookie — your browser never sees it.
-                        </p>
-                        {toolsError && (
-                          <p className="mt-1 text-[11.5px] text-destructive">{toolsError}</p>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => void disconnectGarmin()}
-                        className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-                      >
-                        Disconnect
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                      <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-ink">
-                        <Plug className="size-4" strokeWidth={2} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[13.5px] font-semibold">Connect your Garmin account</p>
-                        <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-                          One sign-in through the open-source MissingMCP gateway. Your Garmin
-                          password is never stored.
-                        </p>
-                        {!status?.configured && (
-                          <p className="mt-1 text-[11.5px] text-destructive">
-                            Missing SESSION_SECRET on this deployment.
-                          </p>
-                        )}
-                      </div>
-                      <button
-                        onClick={connectGarmin}
-                        className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
-                      >
-                        <Plug className="size-3.5" />
-                        Connect Garmin
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-6 grid gap-2 sm:grid-cols-2">
-                  {SUGGESTIONS.map((suggestion) => (
-                    <button
-                      key={suggestion.title}
-                      onClick={() => void send(suggestion.prompt)}
-                      className="group flex items-start gap-2.5 rounded-xl border border-border/80 bg-card/60 px-3.5 py-3 text-left transition-all hover:border-foreground/20 hover:bg-card hover:shadow-[0_10px_24px_-20px_oklch(0_0_0/40%)]"
-                    >
-                      <suggestion.icon
-                        className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-brand-ink"
-                        strokeWidth={1.9}
-                      />
-                      <span className="min-w-0">
-                        <span className="block text-[12.5px] font-medium">{suggestion.title}</span>
-                        <span className="mt-0.5 block text-[11.5px] leading-relaxed text-muted-foreground">
-                          {suggestion.prompt}
-                        </span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-1.5 font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground/70">
-                  <span className="inline-flex items-center gap-1">
-                    <ShieldCheck className="size-3" /> httpOnly token
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <RefreshCw className="size-3" /> {status?.tools ?? 38} curated tools
-                  </span>
-                  <span>Not medical advice</span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:py-8">
-              <div className="space-y-7">
-                {activeChat.messages.map((message) => (
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    running={busy && message.id === activeChat.messages.at(-1)?.id}
-                  />
-                ))}
-              </div>
-              <div ref={endRef} className="h-4" />
-            </div>
-          )}
-        </div>
-
-        <div className="shrink-0 bg-background">
-          <div className="mx-auto w-full max-w-3xl px-4 pb-3">
             {liveStep && (
               <div
-                className="mb-2 flex items-center gap-2 px-2 text-[11.5px] text-muted-foreground"
+                className="mt-3 flex w-full max-w-3xl items-center gap-2 px-2 text-[12px] text-muted-foreground"
                 aria-live="polite"
               >
-                <Loader2 className="size-3 animate-spin text-brand" />
+                <Loader2 className="size-3 animate-spin" />
                 <span className="truncate">
                   {liveStep.kind === "tool"
                     ? `${liveStep.label}${liveStep.detail ? ` · ${liveStep.detail}` : ""}`
@@ -988,27 +849,93 @@ export function ChatApp() {
               </div>
             )}
 
-            {composer}
-
-            <div className="mt-2 flex items-center justify-between px-2 font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground/70">
-              <span>Enter to send · Shift + Enter for a new line</span>
-              <span className="hidden sm:inline">AI can make mistakes</span>
+            <div className="mt-4 flex max-w-3xl flex-wrap justify-center gap-2">
+              {SUGGESTIONS.map((suggestion) => (
+                <button
+                  key={suggestion.title}
+                  onClick={() => void send(suggestion.prompt)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <suggestion.icon className="size-3.5" strokeWidth={1.9} />
+                  {suggestion.title}
+                </button>
+              ))}
             </div>
 
+            <p className="mt-5 text-center text-[11.5px] text-muted-foreground/80">
+              AI can make mistakes. Not medical advice.
+            </p>
+
             {error && (
-              <div className="mt-2 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
+              <div className="mt-4 flex w-full max-w-3xl items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-[12.5px] text-destructive">
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
                 <span className="min-w-0 flex-1">{error}</span>
                 <button
                   onClick={() => setError(null)}
-                  className="shrink-0 text-[11px] underline underline-offset-2"
+                  className="shrink-0 text-[11.5px] underline underline-offset-2"
                 >
                   Dismiss
                 </button>
               </div>
             )}
+
+            {toolsError && !error && (
+              <p className="mt-3 text-center text-[11.5px] text-muted-foreground">{toolsError}</p>
+            )}
           </div>
-        </div>
+        ) : (
+          <>
+            <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
+              <div className="mx-auto w-full max-w-3xl space-y-7 px-4 py-6">
+                {activeChat.messages.map((message) => (
+                  <MessageBubble
+                    key={message.id}
+                    message={message}
+                    running={busy && message.id === activeChat.messages.at(-1)?.id}
+                  />
+                ))}
+                <div ref={endRef} className="h-2" />
+              </div>
+            </div>
+
+            <div className="shrink-0 bg-background">
+              <div className="mx-auto w-full max-w-3xl px-4 pb-3">
+                {liveStep && (
+                  <div
+                    className="mb-2 flex items-center gap-2 px-2 text-[12px] text-muted-foreground"
+                    aria-live="polite"
+                  >
+                    <Loader2 className="size-3 animate-spin" />
+                    <span className="truncate">
+                      {liveStep.kind === "tool"
+                        ? `${liveStep.label}${liveStep.detail ? ` · ${liveStep.detail}` : ""}`
+                        : liveStep.label}
+                    </span>
+                  </div>
+                )}
+
+                {composer}
+
+                <p className="mt-2 text-center text-[11px] text-muted-foreground/80">
+                  AI can make mistakes. Not medical advice.
+                </p>
+
+                {error && (
+                  <div className="mt-2 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-[12.5px] text-destructive">
+                    <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1">{error}</span>
+                    <button
+                      onClick={() => setError(null)}
+                      className="shrink-0 text-[11.5px] underline underline-offset-2"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </main>
     </div>
   );
@@ -1020,7 +947,7 @@ function MessageBubble({ message, running }: { message: Message; running: boolea
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-[20px] rounded-br-md bg-secondary px-4 py-2.5 text-[14.5px] leading-relaxed">
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-3xl bg-secondary px-4 py-2.5 text-[15px] leading-relaxed">
           {message.content}
         </div>
       </div>
@@ -1031,15 +958,6 @@ function MessageBubble({ message, running }: { message: Message; running: boolea
 
   return (
     <div className="group">
-      <div className="mb-1.5 flex items-center gap-2">
-        <span className="grid size-5 place-items-center rounded-md bg-primary text-primary-foreground">
-          <Activity className="size-3" strokeWidth={2.6} />
-        </span>
-        <span className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-muted-foreground">
-          Garmin Studio
-        </span>
-      </div>
-
       <AgentTrace steps={message.steps} running={running} />
 
       {empty && running && (
@@ -1057,14 +975,14 @@ function MessageBubble({ message, running }: { message: Message; running: boolea
       )}
 
       {message.error && (
-        <div className="mt-2 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
+        <div className="mt-2 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-[12.5px] text-destructive">
           <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
           <span>{message.error}</span>
         </div>
       )}
 
       {!running && message.content && (
-        <div className="mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <button
             onClick={() => {
               void navigator.clipboard

@@ -1,4 +1,4 @@
-# Garmin Studio
+# Garmin Chat
 
 A clean, ChatGPT-style training analyst with **live read access to Garmin Connect**. It talks to
 the hosted [MissingMCP Garmin server](https://missingmcp.com/garmin) over MCP, shows its thinking

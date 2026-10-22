@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, Brain, Check, ChevronDown, Loader2, Sparkles, Wrench } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, Loader2 } from "lucide-react";
 
 import type { TraceStep } from "@/lib/chat";
 import { cn } from "@/lib/utils";
@@ -16,15 +16,12 @@ function totalMs(steps: TraceStep[]): number {
 
 function StepIcon({ step }: { step: TraceStep }) {
   if (step.status === "active") {
-    return <Loader2 className="size-3.5 animate-spin text-brand" strokeWidth={2.2} />;
+    return <Loader2 className="size-3 animate-spin text-muted-foreground" strokeWidth={2.2} />;
   }
   if (step.status === "error") {
-    return <AlertCircle className="size-3.5 text-destructive" strokeWidth={2.2} />;
+    return <AlertCircle className="size-3 text-destructive" strokeWidth={2.2} />;
   }
-  if (step.kind === "thinking") {
-    return <Brain className="size-3.5 text-muted-foreground" strokeWidth={1.9} />;
-  }
-  return <Check className="size-3.5 text-brand" strokeWidth={2.4} />;
+  return <Check className="size-3 text-muted-foreground" strokeWidth={2.4} />;
 }
 
 export function AgentTrace({ steps, running }: { steps: TraceStep[]; running: boolean }) {
@@ -39,72 +36,69 @@ export function AgentTrace({ steps, running }: { steps: TraceStep[]; running: bo
   const active = steps.find((step) => step.status === "active");
   const errored = steps.some((step) => step.status === "error");
   const elapsed = totalMs(steps);
+  const tools = steps.filter((step) => step.kind === "tool").length;
 
   const headline = active
     ? active.kind === "thinking"
       ? active.label
       : `${active.label}${active.detail ? ` · ${active.detail}` : ""}`
     : errored
-      ? `Finished with a problem · ${steps.length} steps`
-      : `Worked through ${steps.length} ${steps.length === 1 ? "step" : "steps"}${elapsed ? ` · ${formatMs(elapsed)}` : ""}`;
+      ? "Finished with a problem"
+      : `Thought for ${formatMs(elapsed) || "a moment"}${
+          tools ? ` · ${tools} ${tools === 1 ? "lookup" : "lookups"}` : ""
+        }`;
 
   return (
-    <div className="mb-3 overflow-hidden rounded-xl border border-border/70 bg-muted/35">
+    <div className="mb-2">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/60"
+        className="-ml-2 flex max-w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left text-[13px] transition-colors hover:bg-accent/70"
       >
-        <Sparkles
-          className={cn("size-3.5 shrink-0", running ? "text-brand" : "text-muted-foreground")}
-          strokeWidth={2}
-        />
         <span
           className={cn(
-            "min-w-0 flex-1 truncate text-[12.5px]",
-            running ? "text-foreground" : "text-muted-foreground",
+            "min-w-0 truncate",
+            running ? "text-muted-foreground shimmer-text" : "text-muted-foreground",
           )}
         >
           {headline}
-          {running && <AnimatedDots />}
         </span>
         <ChevronDown
           className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform",
-            open ? "rotate-0" : "-rotate-90",
+            "size-3.5 shrink-0 text-muted-foreground/70 transition-transform",
+            open ? "rotate-180" : "rotate-0",
           )}
         />
       </button>
 
       {open && (
-        <ol className="space-y-0.5 border-t border-border/60 px-2 py-2">
+        <ol className="mt-1 ml-1 space-y-2 border-l border-border/80 pl-3">
           {steps.map((step) => (
-            <li key={step.id} className="rounded-lg px-1.5 py-1.5">
+            <li key={step.id} className="min-w-0">
               <div className="flex items-start gap-2">
-                <span className="mt-0.5 grid size-4 shrink-0 place-items-center">
+                <span className="mt-[3px] grid size-3 shrink-0 place-items-center">
                   <StepIcon step={step} />
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2">
                     <span
                       className={cn(
-                        "truncate text-[12.5px]",
+                        "min-w-0 text-[12.5px] leading-relaxed",
                         step.status === "active"
-                          ? "font-medium text-foreground"
-                          : "text-foreground/80",
+                          ? "text-foreground"
+                          : step.status === "error"
+                            ? "text-destructive"
+                            : "text-muted-foreground",
                       )}
                     >
                       {step.label}
                       {step.detail && (
-                        <span className="font-normal text-muted-foreground"> · {step.detail}</span>
+                        <span className="text-muted-foreground/80"> · {step.detail}</span>
                       )}
                     </span>
-                    {step.kind === "tool" && (
-                      <Wrench className="ml-auto size-3 shrink-0 text-muted-foreground/60" />
-                    )}
                     {step.ms !== undefined && step.ms > 250 && (
-                      <span className="ml-auto shrink-0 font-mono text-[10.5px] text-muted-foreground/80">
+                      <span className="ml-auto shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
                         {formatMs(step.ms)}
                       </span>
                     )}
@@ -113,7 +107,7 @@ export function AgentTrace({ steps, running }: { steps: TraceStep[]; running: bo
                   {step.kind === "thinking" && step.text && (
                     <p
                       className={cn(
-                        "mt-0.5 whitespace-pre-wrap text-[12px] italic leading-relaxed text-muted-foreground",
+                        "mt-0.5 whitespace-pre-wrap text-[12.5px] leading-relaxed text-muted-foreground/90",
                         step.status === "active" ? "max-h-44 overflow-y-auto" : "line-clamp-4",
                       )}
                     >
@@ -127,7 +121,7 @@ export function AgentTrace({ steps, running }: { steps: TraceStep[]; running: bo
                         "mt-0.5 truncate font-mono text-[10.5px]",
                         step.status === "error"
                           ? "text-destructive/90"
-                          : "text-muted-foreground/80",
+                          : "text-muted-foreground/60",
                       )}
                     >
                       {step.preview}
@@ -140,15 +134,5 @@ export function AgentTrace({ steps, running }: { steps: TraceStep[]; running: bo
         </ol>
       )}
     </div>
-  );
-}
-
-function AnimatedDots() {
-  return (
-    <span className="inline-flex items-baseline gap-0.5 pl-1 text-brand" aria-hidden="true">
-      <span className="animate-[dot_1.2s_ease-in-out_infinite]">.</span>
-      <span className="animate-[dot_1.2s_ease-in-out_0.2s_infinite]">.</span>
-      <span className="animate-[dot_1.2s_ease-in-out_0.4s_infinite]">.</span>
-    </span>
   );
 }

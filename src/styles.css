@@ -154,16 +154,21 @@
 }
 
 @layer components {
-  .hero-grid {
-    background-image: radial-gradient(
-      circle at 1px 1px,
-      oklch(0.45 0.02 250 / 14%) 1px,
-      transparent 0
+  /* ChatGPT-style shimmer on the live status label while a step is running. */
+  .shimmer-text {
+    background-image: linear-gradient(
+      90deg,
+      var(--color-muted-foreground) 0%,
+      var(--color-muted-foreground) 38%,
+      var(--color-foreground) 50%,
+      var(--color-muted-foreground) 62%,
+      var(--color-muted-foreground) 100%
     );
-    background-size: 19px 19px;
-    mask-image: linear-gradient(to bottom, black 0%, transparent 92%);
-    -webkit-mask-image: linear-gradient(to bottom, black 0%, transparent 92%);
-    opacity: 0.75;
+    background-size: 220% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: shimmer 2.2s linear infinite;
   }
 
   .prose-chat {
@@ -276,6 +281,15 @@
   }
   50% {
     opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 140% 0;
+  }
+  to {
+    background-position: -140% 0;
   }
 }
 

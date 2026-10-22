@@ -33,7 +33,7 @@ export function ChatApp() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
-  const [model, setModel] = useState(MODELS[0]);
+  const [model, setModel] = useState<string>(MODELS[0]!);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sidebar, setSidebar] = useState(false);

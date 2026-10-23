@@ -6,12 +6,15 @@ import remarkGfm from "remark-gfm";
 import {
   Activity,
   ArrowUpRight,
+  CalendarDays,
   Check,
   ChevronDown,
   CircleHelp,
   Copy,
   CornerLeftUp,
   Dumbbell,
+  Flame,
+  Gauge,
   Heart,
   Loader2,
   Moon,
@@ -19,11 +22,13 @@ import {
   PenLine,
   Plug,
   RotateCcw,
+  Route,
   Settings2,
   Sparkles,
   SquarePen,
   ThumbsDown,
   ThumbsUp,
+  Timer,
   Trash2,
   TriangleAlert,
   Unplug,
@@ -60,10 +65,12 @@ import {
   DEFAULT_TONE,
   TONES,
   mergeModels,
+  pickVisionModel,
   toneById,
   type ModelOption,
   type ToneId,
 } from "@/lib/models";
+import { prepareImage } from "@/lib/image";
 import { haptic, readHapticsSetting, writeHapticsSetting } from "@/lib/haptics";
 import { cn } from "@/lib/utils";
 import {
@@ -81,7 +88,7 @@ const MODEL_KEY = "garmin-chat:model";
 const ONBOARDED_KEY = "garmin-chat:onboarded:v1";
 const FENCE = "```";
 
-const SUGGESTIONS = [
+const PRESETS = [
   {
     icon: Moon,
     title: "Sleep debrief",
@@ -102,11 +109,59 @@ const SUGGESTIONS = [
     title: "Plan the week",
     prompt: "Build my next 7 days of training from my current load, then schedule the workouts.",
   },
+  {
+    icon: Heart,
+    title: "HRV trend",
+    prompt: "Chart my HRV for the last two weeks and tell me whether the trend is real or noise.",
+  },
+  {
+    icon: Gauge,
+    title: "Resting HR",
+    prompt: "Is my resting heart rate drifting up? Compare this month with last month.",
+  },
+  {
+    icon: Flame,
+    title: "Load balance",
+    prompt: "Am I training too hard right now? Check my acute versus chronic load and recovery.",
+  },
+  {
+    icon: Route,
+    title: "Long run check",
+    prompt: "How did my last long run go — pace drift, heart rate and fuelling signals.",
+  },
+  {
+    icon: CalendarDays,
+    title: "Taper plan",
+    prompt: "Taper me into a race in ten days from my current load, then schedule the sessions.",
+  },
+  {
+    icon: Timer,
+    title: "Zone 2 check",
+    prompt: "Is my easy pace actually easy? Look at my zone 2 time and heart rate drift.",
+  },
+  {
+    icon: Activity,
+    title: "Sleep vs load",
+    prompt: "Does my sleep get worse after hard days? Chart sleep against training load.",
+  },
+  {
+    icon: Dumbbell,
+    title: "Strength mix",
+    prompt: "How much strength work am I actually doing compared with cardio this month?",
+  },
 ] as const;
+
+const PRESET_COUNT = 4;
+const PRESET_KEY = "garmin-chat:preset-offset";
 
 const MAX_TOOL_ROUNDS = 5;
 
-function systemPrompt(status: GarminStatus | null, toolCount: number, toneId: ToneId): string {
+function systemPrompt(
+  status: GarminStatus | null,
+  toolCount: number,
+  toneId: ToneId,
+  hasImage: boolean,
+): string {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
@@ -114,14 +169,18 @@ function systemPrompt(status: GarminStatus | null, toolCount: number, toneId: To
   const connection = status?.connected
     ? `The user's Garmin Connect account is connected with ${toolCount} tools available.`
     : "The user's Garmin account is NOT connected, so you cannot read their data. Tell them to press Connect Garmin, then continue helping with general training questions.";
+  const image = hasImage
+    ? "The latest user message carries an image. Read it before answering and use it as primary evidence for that turn."
+    : "No image is attached to the latest message.";
 
   return `You are Garmin Chat, a training analyst with live read access to the user's Garmin Connect account through MCP tools.
 Today is ${weekday}, ${today}. ${connection}
+${image}
 
 ${tone}
 
 How to answer:
-- Ground every claim about the user in tool output. Call a tool before answering questions about their metrics, and never invent numbers, dates, activity names or workouts.
+- Ground every claim about the user in tool output or in the attached image. Never invent numbers, dates, activity names or workouts.
 - Plan the lookup: cheapest summary first, then drill into the one metric that changes the answer. Skip tools whose data cannot affect the reply.
 - Turn relative dates into explicit YYYY-MM-DD ranges ending today.
 - Compare against the user's own baseline (7 or 30 days), not population averages, and quote the delta with numbers.
@@ -131,18 +190,51 @@ How to answer:
 - You may create and schedule workouts when asked. State exactly what you created.
 - This is training guidance, not medical advice. Keep any safety note to a single short line.
 
+Adapt to the turn:
+- Match depth to the decision. A status check gets a short answer; a plan or a why-question gets the reasoning spelled out.
+- Match evidence to the question: one day wants one number and its driver, a trend wants the series, a comparison wants both sides with deltas.
+- If the question is ambiguous between two metrics or date ranges, say which one you answered and why, then offer the other.
+- Answer in the user's language, and keep their units (km or mi, 12h or 24h, kg or lb).
+- If the previous turns already established something, build on it instead of restating it.
+- When the user seems to be asking about a limitation of their device or data, say what is measurable and what is not.
+
 Charts:
-- When a trend, comparison or distribution reads better as a chart, emit exactly one chart block and keep the prose around it to two sentences.
+- Draw a chart whenever the reply compares three or more days, two or more sessions, or a distribution across zones or activity types. Keep the prose around it to two sentences; do not repeat charted values in a table.
 - A chart block is a fenced code block tagged ${FENCE}chart containing one line of valid JSON:
 ${FENCE}chart
 {"type":"line","title":"Sleep score","unit":"score","x":["Oct 12","Oct 13"],"series":[{"name":"Score","data":[72,80]}]}
 ${FENCE}
-- "type" is line, bar or area. "x" holds 3-21 short labels; each series needs the same count of plain numbers; up to 3 series. Optional "unit" is a short label.
-- Only chart numbers you actually retrieved. Do not repeat the same values as a table, and never nest one code fence inside another.
+- "type" is line (trend over time), bar (day-by-day comparison), area (accumulated volume or load) or pie (share of a total, exactly one series).
+- "x" holds 3-21 short labels; each series needs the same number of plain numbers; up to 3 series. Optional "unit" is a short label.
+- Use short x labels like "Oct 12" or "Tue", and name series by what they measure ("Pace", "Sleep score").
+- Build the chart only from numbers you actually retrieved, and never nest one code fence inside another. If the data cannot fill a useful chart, skip it.
+
+Images:
+- The composer accepts photos: watch screens, workout summaries, race results, routes, meal or body-composition screenshots.
+- Read visible values first, then say what you can and cannot read. Do not guess smudged text or partial numbers.
+- Cross-check the image against Garmin data when it makes the answer stronger, and name the conflict if they disagree.
+- Never describe the whole picture; answer the question the image was sent with.
 
 Style:
 - Markdown, short paragraphs. Finding first, evidence second, next step last. No preamble like "Sure" or "Here's".
 - Default under 200 words; go longer only for a plan or a deep dive.`;
+}
+
+/** A stored message as the model expects it, with the newest attachment inlined. */
+function imageAwareMessage(message: Message, withImage: boolean): AgentMessage {
+  if (message.role === "user" && message.image && withImage) {
+    return {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: message.content.trim() || "What can you tell me from this image?",
+        },
+        { type: "image_url", image_url: { url: message.image } },
+      ],
+    };
+  }
+  return { role: message.role, content: message.content };
 }
 
 function isAbort(error: unknown): boolean {
@@ -168,6 +260,8 @@ export function ChatApp() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  const [image, setImage] = useState<string | null>(null);
+  const [presetOffset, setPresetOffset] = useState(0);
   const [model, setModel] = useState<string>(CURATED_MODELS[0]!.id);
   const [models, setModels] = useState<ModelOption[]>(CURATED_MODELS);
   const [tone, setTone] = useState<ToneId>(DEFAULT_TONE);
@@ -196,9 +290,27 @@ export function ChatApp() {
   const toolsAvailable = garminTools.length || status?.tools || 0;
   const modelLabel = models.find((option) => option.id === model)?.label ?? model;
 
+  // A different window of presets each load, so the empty state doesn't go stale.
+  const presets = useMemo(
+    () =>
+      Array.from(
+        { length: Math.min(PRESET_COUNT, PRESETS.length) },
+        (_, index) => PRESETS[(presetOffset + index) % PRESETS.length]!,
+      ),
+    [presetOffset],
+  );
+
   useEffect(() => {
     setChats(loadChats());
     setHydrated(true);
+    try {
+      const saved = Number(localStorage.getItem(PRESET_KEY));
+      const offset = Number.isFinite(saved) ? Math.abs(saved) % PRESETS.length : 0;
+      setPresetOffset(offset);
+      localStorage.setItem(PRESET_KEY, String((offset + PRESET_COUNT) % PRESETS.length));
+    } catch {
+      // Storage blocked: the first window is as good as any.
+    }
     const savedTone = localStorage.getItem(TONE_KEY);
     if (savedTone && TONES.some((option) => option.id === savedTone)) {
       setTone(savedTone as ToneId);
@@ -338,6 +450,7 @@ export function ChatApp() {
     setMobileSidebar(false);
     setError(null);
     setInput("");
+    setImage(null);
     stickRef.current = true;
   }, []);
 
@@ -528,9 +641,18 @@ export function ChatApp() {
       tools = toolSpecs(loaded);
     }
 
+    // Only the prompt being answered carries its image: past pixels stay in the
+    // transcript but stop costing tokens on later turns.
+    const withImage = !!prior.at(-1)?.image;
+    const lastIndex = prior.length - 1;
     const history: AgentMessage[] = [
-      { role: "system", content: systemPrompt(status, tools.length, tone) },
-      ...prior.map((message) => ({ role: message.role, content: message.content })),
+      {
+        role: "system",
+        content: systemPrompt(status, tools.length, tone, withImage),
+      },
+      ...prior.map((message, index) =>
+        imageAwareMessage(message, withImage && index === lastIndex),
+      ),
     ];
 
     try {
@@ -703,16 +825,40 @@ export function ChatApp() {
     return streamed;
   }
 
+  async function pickImage(file: File) {
+    try {
+      const dataUrl = await prepareImage(file);
+      setImage(dataUrl);
+      const next = pickVisionModel(model, models);
+      if (next !== model) {
+        setModel(next);
+        toast("Model switched for images", {
+          description: `${models.find((option) => option.id === next)?.label ?? next} can read what you upload.`,
+        });
+      }
+    } catch (caught) {
+      toast.error("Couldn't attach that image", { description: errorText(caught) });
+    }
+  }
+
   async function send(raw: string) {
     const text = raw.trim();
-    if (!text || busy) return;
+    const attached = image;
+    if ((!text && !attached) || busy) return;
 
     haptic("tap");
     setError(null);
     setInput("");
+    setImage(null);
     stickRef.current = true;
 
-    const userMessage: Message = { id: uid(), role: "user", content: text, steps: [] };
+    const userMessage: Message = {
+      id: uid(),
+      role: "user",
+      content: text,
+      ...(attached ? { image: attached } : {}),
+      steps: [],
+    };
     const assistantId = uid();
     const assistantMessage: Message = {
       id: assistantId,
@@ -736,7 +882,7 @@ export function ChatApp() {
       setChats((previous) => [
         {
           id: chatId,
-          title: text.slice(0, 52),
+          title: text.slice(0, 52) || "Image question",
           messages: [...prior, assistantMessage],
           updated: Date.now(),
         },
@@ -855,13 +1001,10 @@ export function ChatApp() {
         haptic("select");
         chooseTone(next);
       }}
-      quickPrompts={SUGGESTIONS}
+      image={image}
+      onPickImage={(file) => void pickImage(file)}
+      onRemoveImage={() => setImage(null)}
       placeholder={connected ? "Ask about your training" : "Ask anything"}
-      sidebarOpen={sidebarOpen}
-      onToggleSidebar={() => {
-        setMobileSidebar(false);
-        setSidebarOpen((open) => !open);
-      }}
       onNewChat={newChat}
       onOpenSettings={() => setSettingsOpen(true)}
       onConnect={connectGarmin}
@@ -1152,8 +1295,8 @@ export function ChatApp() {
             </h1>
             <p className="mt-2 max-w-md text-center text-[13.5px] leading-relaxed text-muted-foreground">
               {connected
-                ? `${toolsAvailable} Garmin tools are live. Sleep, recovery, load and workouts — read as we go.`
-                : "Connect Garmin to read your sleep, recovery and workouts inside the chat."}
+                ? `${toolsAvailable} Garmin tools are live. Sleep, recovery, load and workouts — read as we go. Attach a screenshot with +.`
+                : "Connect Garmin to read your sleep, recovery and workouts inside the chat — or attach a screenshot with +."}
             </p>
 
             <div className="mt-6 w-full max-w-3xl">{composer}</div>
@@ -1173,11 +1316,12 @@ export function ChatApp() {
             )}
 
             <div className="mt-4 flex max-w-3xl flex-wrap justify-center gap-2">
-              {SUGGESTIONS.map((suggestion) => (
+              {presets.map((suggestion, index) => (
                 <button
                   key={suggestion.title}
                   onClick={() => void send(suggestion.prompt)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-[13px] text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:bg-accent hover:text-foreground hover:shadow-sm"
+                  style={{ animationDelay: `${index * 70}ms` }}
+                  className="animate-in fade-in-0 fill-mode-both slide-in-from-bottom-1 inline-flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-[13px] text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:bg-accent hover:text-foreground hover:shadow-sm"
                 >
                   <suggestion.icon className="size-3.5" strokeWidth={1.9} />
                   {suggestion.title}
@@ -1402,8 +1546,15 @@ function MessageBubble({
               <PenLine className="size-3.5" />
             </button>
           )}
-          <div className="whitespace-pre-wrap rounded-3xl bg-secondary px-4 py-2.5 text-[15px] leading-relaxed">
-            {message.content}
+          <div className="overflow-hidden rounded-3xl bg-secondary px-4 py-2.5 text-[15px] leading-relaxed">
+            {message.image && (
+              <img
+                src={message.image}
+                alt="Attached"
+                className="mb-2 max-h-64 w-full rounded-2xl object-cover"
+              />
+            )}
+            {message.content && <div className="whitespace-pre-wrap">{message.content}</div>}
           </div>
         </div>
       </div>

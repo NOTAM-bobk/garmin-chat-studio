@@ -12,9 +12,12 @@ export type ToolCallWire = {
   function: { name: string; arguments: string };
 };
 
+export type ContentPart =
+  { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+
 export type AgentMessage = {
   role: ChatRole | "tool";
-  content?: string;
+  content?: string | ContentPart[];
   tool_calls?: ToolCallWire[];
   tool_call_id?: string;
   /** Opaque thinking artifacts a provider needs replayed on the next turn. */

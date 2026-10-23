@@ -93,6 +93,40 @@ export const TONES: Tone[] = [
   },
 ];
 
+/**
+ * Vision heuristic for the model picker.
+ *
+ * Puter exposes hundreds of ids, so instead of a brittle allow-list we read the
+ * family from the id: multimodal families pass, audio/code/image generators and
+ * the deliberately tiny tiers do not.
+ */
+const VISION_FAMILY =
+  /(gpt-5|gpt-4o|gpt-4\.1|o4|claude|gemini|vision|llava|pixtral|qwen.*vl|glm.*v|internvl|muse-spark)/i;
+const NON_VISION_TIER =
+  /(^|[-_/])(nano|mini|flash-lite|codex|dall-e|imagen|tts|whisper|embed|rerank|sora|coder)([-_/.]|$)/i;
+
+/** Curated ids to try first when an image needs a model that can read it. */
+const VISION_PREFERENCE = ["gpt-5.6", "claude-sonnet-5", "gemini-4-argon", "claude-opus-4-8"];
+
+export function isVisionModel(id: string): boolean {
+  const name = id.toLowerCase();
+  if (!name.trim() || NON_VISION_TIER.test(name)) return false;
+  return VISION_FAMILY.test(name);
+}
+
+/**
+ * The model to use when the user attaches an image: keep the current pick when
+ * it can see images, otherwise move to the best vision model on offer.
+ */
+export function pickVisionModel(current: string, options: ModelOption[]): string {
+  if (isVisionModel(current)) return current;
+  for (const id of VISION_PREFERENCE) {
+    if (options.some((option) => option.id === id) && isVisionModel(id)) return id;
+  }
+  const fallback = options.find((option) => isVisionModel(option.id));
+  return fallback?.id ?? current;
+}
+
 export const DEFAULT_TONE: ToneId = "coach";
 
 export function toneById(id: string): Tone {

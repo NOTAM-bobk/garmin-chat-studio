@@ -23,6 +23,8 @@ export type Message = {
   error?: string;
   /** Two follow-up questions the model proposed for this answer. */
   followups?: string[];
+  /** Data URL of an image the user attached to this prompt. */
+  image?: string;
   /** Local thumbs feedback, kept in this browser only. */
   feedback?: "up" | "down";
 };
@@ -77,6 +79,10 @@ function sanitizeMessage(raw: unknown): Message | null {
         .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
         .slice(0, 2)
     : [];
+  const image =
+    typeof record["image"] === "string" && record["image"].startsWith("data:image/")
+      ? record["image"]
+      : undefined;
   const feedback =
     record["feedback"] === "up" ? "up" : record["feedback"] === "down" ? "down" : undefined;
   return {
@@ -86,6 +92,7 @@ function sanitizeMessage(raw: unknown): Message | null {
     steps,
     ...(error ? { error } : {}),
     ...(followups.length > 0 ? { followups } : {}),
+    ...(image ? { image } : {}),
     ...(feedback ? { feedback } : {}),
   };
 }
@@ -119,10 +126,24 @@ export function loadChats(): Chat[] {
   }
 }
 
+function withoutImages(chats: Chat[]): Chat[] {
+  return chats.map((chat) => ({
+    ...chat,
+    messages: chat.messages.map(({ image: _image, ...rest }) => rest),
+  }));
+}
+
 export function saveChats(chats: Chat[]) {
   if (typeof window === "undefined") return;
+  const trimmed = chats.slice(0, MAX_CHATS);
   try {
-    localStorage.setItem(KEY, JSON.stringify(chats.slice(0, MAX_CHATS)));
+    localStorage.setItem(KEY, JSON.stringify(trimmed));
+    return;
+  } catch {
+    // Attached images are heavy: drop them rather than lose the transcript.
+  }
+  try {
+    localStorage.setItem(KEY, JSON.stringify(withoutImages(trimmed)));
   } catch {
     // Storage full or blocked — chats stay in memory for this session.
   }

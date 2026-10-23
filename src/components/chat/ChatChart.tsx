@@ -5,8 +5,11 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Line,
   LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -20,6 +23,7 @@ const SERIES_COLORS = [
   "var(--color-chart-2)",
   "var(--color-chart-3)",
   "var(--color-chart-4)",
+  "var(--color-chart-5)",
 ];
 
 /** Render a chart the assistant asked for, using the shared theme tokens. */
@@ -36,6 +40,15 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
         });
         return row;
       }),
+    [spec],
+  );
+
+  const slices = useMemo(
+    () =>
+      spec.x.map((label, index) => ({
+        label,
+        value: spec.series[0]?.data[index] ?? 0,
+      })),
     [spec],
   );
 
@@ -64,6 +77,19 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
     </>
   );
 
+  const legend =
+    spec.type === "pie"
+      ? slices.map((slice, index) => ({
+          label: `${slice.label} · ${slice.value}${spec.unit ?? ""}`,
+          color: SERIES_COLORS[index % SERIES_COLORS.length],
+        }))
+      : spec.series.length > 1
+        ? spec.series.map((series, index) => ({
+            label: series.name ?? `Series ${index + 1}`,
+            color: SERIES_COLORS[index % SERIES_COLORS.length],
+          }))
+        : [];
+
   return (
     <figure className="my-4 overflow-hidden rounded-xl border border-border bg-card p-3">
       {(spec.title || spec.unit) && (
@@ -80,7 +106,33 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
       <div className="h-[220px] w-full">
         {mounted && (
           <ResponsiveContainer width="100%" height="100%">
-            {spec.type === "bar" ? (
+            {spec.type === "pie" ? (
+              <PieChart margin={{ top: 4, right: 6, bottom: 0, left: 6 }}>
+                <Pie
+                  data={slices}
+                  dataKey="value"
+                  nameKey="label"
+                  innerRadius={48}
+                  outerRadius={84}
+                  paddingAngle={1.5}
+                  stroke="var(--color-card)"
+                  strokeWidth={1.5}
+                >
+                  {slices.map((slice, index) => (
+                    <Cell key={slice.label} fill={SERIES_COLORS[index % SERIES_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{
+                    fontSize: 12,
+                    borderRadius: 10,
+                    border: "1px solid var(--color-border)",
+                    background: "var(--color-card)",
+                    color: "var(--color-card-foreground)",
+                  }}
+                />
+              </PieChart>
+            ) : spec.type === "bar" ? (
               <BarChart data={rows} margin={{ top: 4, right: 6, bottom: 0, left: -8 }}>
                 {plot}
                 {spec.series.map((series, index) => (
@@ -132,18 +184,15 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
         )}
       </div>
 
-      {spec.series.length > 1 && (
+      {legend.length > 0 && (
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 px-1">
-          {spec.series.map((series, index) => (
+          {legend.map((item, index) => (
             <span
               key={index}
               className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground"
             >
-              <span
-                className="size-1.5 rounded-full"
-                style={{ background: SERIES_COLORS[index % SERIES_COLORS.length] }}
-              />
-              {series.name ?? `Series ${index + 1}`}
+              <span className="size-1.5 rounded-full" style={{ background: item.color }} />
+              {item.label}
             </span>
           ))}
         </div>

@@ -7,13 +7,22 @@
 
 export type ChartSeries = { name?: string; data: number[] };
 
+export type ChartType = "line" | "bar" | "area" | "pie";
+
 export type ChartSpec = {
-  type: "line" | "bar" | "area";
+  type: ChartType;
   title?: string;
   unit?: string;
   x: string[];
   series: ChartSeries[];
 };
+
+function chartType(value: unknown): ChartType {
+  if (value === "bar" || value === "column") return "bar";
+  if (value === "area") return "area";
+  if (value === "pie" || value === "donut") return "pie";
+  return "line";
+}
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -34,12 +43,17 @@ export function parseChartSpec(raw: string): ChartSpec | null {
     : [];
   if (x.length < 2) return null;
 
+  const type = chartType(record["type"]);
   const rawSeries = Array.isArray(record["series"]) ? record["series"] : [];
   const series: ChartSeries[] = [];
   for (const entry of rawSeries.slice(0, 3)) {
     if (!entry || typeof entry !== "object") continue;
     const item = entry as Record<string, unknown>;
-    const data = Array.isArray(item["data"]) ? item["data"].filter(isFiniteNumber) : [];
+    const data = Array.isArray(item["data"])
+      ? item["data"].filter(isFiniteNumber)
+      : Array.isArray(item["values"])
+        ? item["values"].filter(isFiniteNumber)
+        : [];
     if (data.length !== x.length) continue;
     series.push({
       ...(typeof item["name"] === "string" && item["name"].trim()
@@ -48,9 +62,24 @@ export function parseChartSpec(raw: string): ChartSpec | null {
       data,
     });
   }
-  if (series.length === 0) return null;
 
-  const type = record["type"] === "bar" ? "bar" : record["type"] === "area" ? "area" : "line";
+  // A bare number list is enough for a single-series chart.
+  if (series.length === 0) {
+    const flat = Array.isArray(record["data"])
+      ? record["data"].filter(isFiniteNumber)
+      : Array.isArray(record["values"])
+        ? record["values"].filter(isFiniteNumber)
+        : [];
+    if (flat.length === x.length) {
+      series.push({
+        ...(typeof record["name"] === "string" && record["name"].trim()
+          ? { name: record["name"].trim().slice(0, 40) }
+          : {}),
+        data: flat,
+      });
+    }
+  }
+  if (series.length === 0) return null;
 
   return {
     type,

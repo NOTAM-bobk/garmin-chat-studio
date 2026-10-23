@@ -1,29 +1,18 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-  type RefObject,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   ArrowUp,
   ChevronDown,
   Dumbbell,
-  LayoutGrid,
-  LayoutTemplate,
+  ImagePlus,
   Lightbulb,
-  List,
   Mic,
-  Palette,
   Plug,
   Plus,
   Scale,
   Settings2,
-  Slash,
   Square,
   SquarePen,
+  X,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -31,13 +20,7 @@ import {
 import { TONES, type ToneId } from "@/lib/models";
 import { cn } from "@/lib/utils";
 
-type PanelId = "add" | "tools" | "layout" | "color" | "tone" | null;
-
-export type QuickPrompt = {
-  icon: LucideIcon;
-  title: string;
-  prompt: string;
-};
+type PanelId = "add" | "tone" | null;
 
 export interface PromptBarProps {
   value: string;
@@ -49,10 +32,10 @@ export interface PromptBarProps {
   tools?: number;
   tone: ToneId;
   onToneChange: (tone: ToneId) => void;
-  quickPrompts: readonly QuickPrompt[];
+  image?: string | null | undefined;
+  onPickImage?: ((file: File) => void) | undefined;
+  onRemoveImage?: (() => void) | undefined;
   placeholder?: string;
-  sidebarOpen?: boolean;
-  onToggleSidebar?: () => void;
   onNewChat?: () => void;
   onOpenSettings?: () => void;
   onConnect?: () => void;
@@ -66,8 +49,6 @@ const toneIcons: Record<ToneId, LucideIcon> = {
   explain: Lightbulb,
   straight: Zap,
 };
-
-const accentColors = ["#3a3a3f", "#5c8dff", "#ff7a5c", "#4fd1a5", "#c98bff"];
 
 type SpeechResultList = {
   length: number;
@@ -108,10 +89,10 @@ export default function PromptBar({
   tools = 0,
   tone,
   onToneChange,
-  quickPrompts,
+  image = null,
+  onPickImage,
+  onRemoveImage,
   placeholder = "Ask about your training",
-  sidebarOpen = true,
-  onToggleSidebar,
   onNewChat,
   onOpenSettings,
   onConnect,
@@ -119,11 +100,11 @@ export default function PromptBar({
   className,
 }: PromptBarProps) {
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
-  const [accent, setAccent] = useState(accentColors[0]!);
   const [recording, setRecording] = useState(false);
   const [canDictate, setCanDictate] = useState(false);
   const [sending, setSending] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const valueRef = useRef(value);
   const localTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -163,9 +144,8 @@ export default function PromptBar({
       onStop();
       return;
     }
-    const text = value.trim();
-    if (!text) return;
-    onSubmit(text);
+    if (!value.trim() && !image) return;
+    onSubmit(value.trim());
     setSending(true);
     setTimeout(() => setSending(false), 350);
   };
@@ -211,14 +191,12 @@ export default function PromptBar({
   }, [appendTranscript]);
 
   const ModeIcon = toneIcons[tone];
-  const canSend = busy || value.trim().length > 0;
-  const accentStyle = { "--pb-accent": accent } as CSSProperties;
+  const canSend = busy || value.trim().length > 0 || !!image;
 
   return (
     <div
       ref={rootRef}
       className={cn("prompt-bar-glow relative w-full rounded-[24px] bg-muted p-[2px]", className)}
-      style={accentStyle}
     >
       <div className="rounded-[22px] bg-muted p-4 pb-3 sm:p-5 sm:pb-4">
         <textarea
@@ -237,11 +215,34 @@ export default function PromptBar({
           className="mb-6 max-h-[220px] w-full resize-none bg-transparent text-base leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none"
         />
 
+        {image && (
+          <div className="mb-4 flex items-center gap-3">
+            <div className="relative">
+              <img
+                src={image}
+                alt="Attached"
+                className="h-16 w-16 rounded-xl object-cover ring-1 ring-border"
+              />
+              <button
+                type="button"
+                aria-label="Remove image"
+                onClick={() => onRemoveImage?.()}
+                className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full bg-foreground text-background shadow-sm transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X size={11} />
+              </button>
+            </div>
+            <span className="min-w-0 flex-1 text-[11.5px] text-muted-foreground">
+              Image attached — ask what you want read from it.
+            </span>
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
             <div className="relative">
               <BarButton
-                label="More actions"
+                label="Add"
                 expanded={openPanel === "add"}
                 onClick={() => togglePanel("add")}
               >
@@ -249,6 +250,14 @@ export default function PromptBar({
               </BarButton>
               {openPanel === "add" && (
                 <Menu>
+                  <MenuItem
+                    icon={ImagePlus}
+                    label="Upload image"
+                    onClick={() => {
+                      setOpenPanel(null);
+                      fileRef.current?.click();
+                    }}
+                  />
                   <MenuItem
                     icon={SquarePen}
                     label="New chat"
@@ -279,31 +288,17 @@ export default function PromptBar({
               )}
             </div>
 
-            <div className="relative">
-              <BarButton
-                label="Quick prompts"
-                expanded={openPanel === "tools"}
-                onClick={() => togglePanel("tools")}
-              >
-                <Slash size={18} />
-              </BarButton>
-              {openPanel === "tools" && (
-                <Menu minWidth={220}>
-                  {quickPrompts.map((suggestion) => (
-                    <MenuItem
-                      key={suggestion.title}
-                      icon={suggestion.icon}
-                      label={suggestion.title}
-                      onClick={() => {
-                        setOpenPanel(null);
-                        onChange(suggestion.prompt);
-                        fieldRef.current?.focus();
-                      }}
-                    />
-                  ))}
-                </Menu>
-              )}
-            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) onPickImage?.(file);
+              }}
+            />
 
             {connected && (
               <span className="ml-1 hidden items-center gap-1.5 rounded-full px-2 py-1 text-[11.5px] text-muted-foreground sm:inline-flex">
@@ -315,69 +310,6 @@ export default function PromptBar({
           </div>
 
           <div className="flex items-center gap-1">
-            <div className="relative hidden sm:block">
-              <BarButton
-                label="View"
-                expanded={openPanel === "layout"}
-                onClick={() => togglePanel("layout")}
-              >
-                <LayoutGrid size={18} />
-              </BarButton>
-              {openPanel === "layout" && (
-                <Menu align="right" minWidth={190}>
-                  <MenuItem
-                    icon={List}
-                    label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-                    onClick={() => {
-                      setOpenPanel(null);
-                      onToggleSidebar?.();
-                    }}
-                  />
-                  <MenuItem
-                    icon={LayoutTemplate}
-                    label="New chat"
-                    onClick={() => {
-                      setOpenPanel(null);
-                      onNewChat?.();
-                    }}
-                  />
-                </Menu>
-              )}
-            </div>
-
-            <div className="relative hidden sm:block">
-              <BarButton
-                label="Accent colour"
-                expanded={openPanel === "color"}
-                onClick={() => togglePanel("color")}
-              >
-                <Palette size={18} />
-              </BarButton>
-              {openPanel === "color" && (
-                <div className="absolute right-0 top-11 z-20 flex gap-2 rounded-2xl bg-popover p-2.5 shadow-lg ring-1 ring-border">
-                  {accentColors.map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      aria-label={`Use accent ${color}`}
-                      aria-pressed={accent === color}
-                      onClick={() => {
-                        setAccent(color);
-                        setOpenPanel(null);
-                      }}
-                      style={{ background: color }}
-                      className={cn(
-                        "h-5 w-5 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        accent === color
-                          ? "ring-2 ring-foreground ring-offset-2 ring-offset-popover"
-                          : "",
-                      )}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
             <div className="relative">
               <button
                 type="button"
@@ -429,10 +361,11 @@ export default function PromptBar({
               aria-label={busy ? "Stop generating" : "Send message"}
               onClick={handleSubmit}
               disabled={!canSend}
-              style={canSend ? { backgroundColor: accent } : undefined}
               className={cn(
                 "flex h-9 w-9 items-center justify-center rounded-full transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed",
-                canSend ? "text-white" : "bg-foreground/15 text-foreground opacity-60",
+                canSend
+                  ? "bg-foreground text-background"
+                  : "bg-foreground/15 text-foreground opacity-60",
                 sending ? "scale-90" : "scale-100",
               )}
             >

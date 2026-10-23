@@ -1,18 +1,24 @@
 import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { Activity, Moon, Zap } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 
 import PromptBar from "@/components/chat/PromptBar";
 import type { ToneId } from "@/lib/models";
 
-const quickPrompts = [
-  { icon: Moon, title: "Sleep debrief", prompt: "How did I sleep this week?" },
-  { icon: Zap, title: "Readiness check", prompt: "Why is my readiness low?" },
-  { icon: Activity, title: "Compare runs", prompt: "Compare my last runs." },
-];
+const PIXEL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
-function Harness({ onSubmit }: { onSubmit: (text: string) => void }) {
+function Harness({
+  onSubmit,
+  onPickImage,
+  onRemoveImage,
+  image,
+}: {
+  onSubmit: (text: string) => void;
+  onPickImage?: ((file: File) => void) | undefined;
+  onRemoveImage?: (() => void) | undefined;
+  image?: string | null | undefined;
+}) {
   const [value, setValue] = useState("");
   const [tone, setTone] = useState<ToneId>("coach");
   return (
@@ -25,7 +31,9 @@ function Harness({ onSubmit }: { onSubmit: (text: string) => void }) {
         busy={false}
         tone={tone}
         onToneChange={setTone}
-        quickPrompts={quickPrompts}
+        image={image}
+        onPickImage={onPickImage}
+        onRemoveImage={onRemoveImage}
       />
       <p data-testid="tone">{tone}</p>
     </>
@@ -33,7 +41,7 @@ function Harness({ onSubmit }: { onSubmit: (text: string) => void }) {
 }
 
 describe("PromptBar", () => {
-  it("submits typed text with Enter and clears nothing on its own", () => {
+  it("submits typed text with Enter", () => {
     const onSubmit = vi.fn();
     render(<Harness onSubmit={onSubmit} />);
 
@@ -44,23 +52,51 @@ describe("PromptBar", () => {
     expect(onSubmit).toHaveBeenCalledWith("How is my load?");
   });
 
-  it("fills the field from the quick prompt menu", () => {
-    render(<Harness onSubmit={vi.fn()} />);
-
-    fireEvent.click(screen.getByLabelText("Quick prompts"));
-    fireEvent.click(screen.getByRole("option", { name: "Sleep debrief" }));
-
-    expect((screen.getByLabelText("Ask about your training") as HTMLTextAreaElement).value).toBe(
-      "How did I sleep this week?",
+  it("handles an image from the plus menu", () => {
+    const onPickImage = vi.fn();
+    const onRemoveImage = vi.fn();
+    const { rerender } = render(
+      <Harness onSubmit={vi.fn()} onPickImage={onPickImage} onRemoveImage={onRemoveImage} />,
     );
+
+    fireEvent.click(screen.getByLabelText("Add"));
+    expect(screen.getByRole("option", { name: "Upload image" })).toBeInTheDocument();
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["pixels"], "watch.png", { type: "image/png" });
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(onPickImage).toHaveBeenCalledWith(file);
+
+    rerender(
+      <Harness
+        onSubmit={vi.fn()}
+        onPickImage={onPickImage}
+        onRemoveImage={onRemoveImage}
+        image={PIXEL}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Remove image"));
+    expect(onRemoveImage).toHaveBeenCalled();
   });
 
-  it("switches tone from the mode pill", () => {
+  it("sends with only an image attached", () => {
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} image={PIXEL} />);
+
+    fireEvent.click(screen.getByLabelText("Send message"));
+
+    expect(onSubmit).toHaveBeenCalledWith("");
+  });
+
+  it("keeps the tone pill and drops the old view controls", () => {
     render(<Harness onSubmit={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: /Coach/ }));
     fireEvent.click(screen.getByRole("option", { name: "Analyst" }));
-
     expect(screen.getByTestId("tone").textContent).toBe("analyst");
+
+    expect(screen.queryByLabelText("Quick prompts")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("View")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Accent colour")).not.toBeInTheDocument();
   });
 });

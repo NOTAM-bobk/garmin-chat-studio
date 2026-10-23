@@ -79,13 +79,20 @@ import { chatBaseDomain, chatPath, chatSlugFromHost, chatUrlFor } from "@/lib/ch
 import {
   CURATED_MODELS,
   DEFAULT_TONE,
-  TONES,
   mergeModels,
   pickVisionModel,
-  toneById,
   type ModelOption,
-  type ToneId,
 } from "@/lib/models";
+import {
+  addMode,
+  dropMode,
+  loadModes,
+  modeToneId,
+  resolveTone,
+  saveModes,
+  toneOptions,
+  type CustomMode,
+} from "@/lib/modes";
 import { APP_VERSION, BUILDER } from "@/lib/app-meta";
 import { prepareImage } from "@/lib/image";
 import {
@@ -200,14 +207,14 @@ const MAX_TOOL_ROUNDS = 6;
 function systemPrompt(
   status: GarminStatus | null,
   toolCount: number,
-  toneId: ToneId,
+  tonePrompt: string,
   hasImage: boolean,
   memories: Memory[],
 ): string {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
-  const tone = toneById(toneId).prompt;
+  const tone = tonePrompt;
   const connection = status?.connected
     ? `The user's Garmin Connect account is connected with ${toolCount} tools available.`
     : "The user's Garmin account is NOT connected, so you cannot read their data. Tell them to press Connect Garmin, then continue helping with general training questions.";
@@ -316,7 +323,8 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
   const [presetOffset, setPresetOffset] = useState(0);
   const [model, setModel] = useState<string>(CURATED_MODELS[0]!.id);
   const [models, setModels] = useState<ModelOption[]>(CURATED_MODELS);
-  const [tone, setTone] = useState<ToneId>(DEFAULT_TONE);
+  const [tone, setTone] = useState<string>(DEFAULT_TONE);
+  const [modes, setModes] = useState<CustomMode[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mobileSidebar, setMobileSidebar] = useState(false);
@@ -365,6 +373,8 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     const storedMemories = loadMemories();
     memoriesRef.current = storedMemories;
     setMemories(storedMemories);
+    const storedModes = loadModes();
+    setModes(storedModes);
     setHydrated(true);
     try {
       const saved = Number(localStorage.getItem(PRESET_KEY));
@@ -375,8 +385,8 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
       // Storage blocked: the first window is as good as any.
     }
     const savedTone = localStorage.getItem(TONE_KEY);
-    if (savedTone && TONES.some((option) => option.id === savedTone)) {
-      setTone(savedTone as ToneId);
+    if (savedTone && toneOptions(storedModes).some((option) => option.id === savedTone)) {
+      setTone(savedTone);
     }
     const savedModel = localStorage.getItem(MODEL_KEY);
     if (savedModel) setModel(savedModel);
@@ -452,6 +462,10 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     memoriesRef.current = memories;
     if (hydrated) saveMemories(memories);
   }, [memories, hydrated]);
+
+  useEffect(() => {
+    if (hydrated) saveModes(modes);
+  }, [modes, hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -655,13 +669,34 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     }
   }
 
-  function chooseTone(next: ToneId) {
+  function chooseTone(next: string) {
     setTone(next);
     try {
       localStorage.setItem(TONE_KEY, next);
     } catch {
       // Private mode: the tone still applies for this session.
     }
+  }
+
+  /** Save a user-written mode and switch to it straight away. */
+  function createMode(name: string, instruction: string) {
+    const { list, mode, duplicate } = addMode(modes, name, instruction);
+    if (duplicate) {
+      toast("Mode already saved", { description: `${mode.name} already exists.` });
+      chooseTone(modeToneId(mode.id));
+      return;
+    }
+    setModes(list);
+    saveModes(list);
+    chooseTone(modeToneId(mode.id));
+    toast("Mode created", { description: `${mode.name} is now the active mode.` });
+  }
+
+  function deleteMode(id: string) {
+    const next = dropMode(modes, id);
+    setModes(next);
+    saveModes(next);
+    if (tone === modeToneId(id)) chooseTone(DEFAULT_TONE);
   }
 
   function chooseHaptics(next: boolean) {
@@ -886,7 +921,13 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     const history: AgentMessage[] = [
       {
         role: "system",
-        content: systemPrompt(status, garminSpecs.length, tone, withImage, memoriesRef.current),
+        content: systemPrompt(
+          status,
+          garminSpecs.length,
+          resolveTone(tone, modes).prompt,
+          withImage,
+          memoriesRef.current,
+        ),
       },
       ...prior.map((message, index) =>
         imageAwareMessage(message, withImage && index === lastIndex),
@@ -1253,6 +1294,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         haptic("select");
         chooseTone(next);
       }}
+      modes={modes}
       image={image}
       onPickImage={(file) => void pickImage(file)}
       onRemoveImage={() => setImage(null)}
@@ -1310,6 +1352,9 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         syncState={syncState}
         onSignIn={() => void startCloudSync()}
         onSignOut={() => void stopCloudSync()}
+        modes={modes}
+        onCreateMode={createMode}
+        onDeleteMode={deleteMode}
       />
 
       <ShareDialog

@@ -57,7 +57,10 @@ export function mergeModels(
   return [...base, ...extra];
 }
 
-export type ToneId = "coach" | "analyst" | "explain" | "straight";
+/** Built-in tones plus the user's own (`custom:<id>`), so this stays open. */
+export type ToneId = string;
+
+export type BuiltInToneId = "coach" | "analyst" | "explain" | "straight";
 
 export type Tone = {
   id: ToneId;
@@ -132,3 +135,6 @@ export const DEFAULT_TONE: ToneId = "coach";
 export function toneById(id: string): Tone {
   return TONES.find((tone) => tone.id === id) ?? TONES[0]!;
 }
+
+export const isBuiltInTone = (id: string): id is BuiltInToneId =>
+  TONES.some((tone) => tone.id === id);

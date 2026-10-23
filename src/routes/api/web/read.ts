@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { jsonResponse } from "@/server/garmin.server";
-import { exaConfigured, exaRead, exaSetupHint } from "@/server/exa.server";
+import { readPage, webConfigured, webSetupHint } from "@/server/web.server";
 
 type ReadBody = { url?: unknown };
 
@@ -9,7 +9,7 @@ export const Route = createFileRoute("/api/web/read")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        if (!exaConfigured()) return jsonResponse({ error: exaSetupHint() }, 503);
+        if (!webConfigured()) return jsonResponse({ error: webSetupHint() }, 503);
 
         let body: ReadBody;
         try {
@@ -24,7 +24,7 @@ export const Route = createFileRoute("/api/web/read")({
         }
 
         try {
-          const source = await exaRead(raw);
+          const source = await readPage(raw);
           if (!source) {
             return jsonResponse({ error: "That page couldn't be read." }, 404);
           }

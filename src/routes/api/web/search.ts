@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { jsonResponse } from "@/server/garmin.server";
-import { exaConfigured, exaSearch, exaSetupHint } from "@/server/exa.server";
+import { searchWeb, webConfigured, webSetupHint } from "@/server/web.server";
 
 type SearchBody = { query?: unknown; numResults?: unknown };
 
@@ -9,7 +9,7 @@ export const Route = createFileRoute("/api/web/search")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        if (!exaConfigured()) return jsonResponse({ error: exaSetupHint() }, 503);
+        if (!webConfigured()) return jsonResponse({ error: webSetupHint() }, 503);
 
         let body: SearchBody;
         try {
@@ -29,7 +29,7 @@ export const Route = createFileRoute("/api/web/search")({
         const numResults = Math.min(Math.max(Math.round(requested), 3), 8);
 
         try {
-          const sources = await exaSearch(query.slice(0, 400), numResults);
+          const { sources } = await searchWeb(query.slice(0, 400), numResults);
           return jsonResponse({ sources });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Web search failed.";

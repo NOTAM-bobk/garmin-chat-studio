@@ -18,6 +18,7 @@ import {
   Plus,
   Scale,
   Settings2,
+  Sparkles,
   Square,
   SquarePen,
   X,
@@ -25,7 +26,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { TONES, type ToneId } from "@/lib/models";
+import { toneOptions, type CustomMode } from "@/lib/modes";
+import type { ToneId } from "@/lib/models";
 import { cn } from "@/lib/utils";
 
 type PanelId = "add" | "tone" | null;
@@ -40,6 +42,8 @@ export interface PromptBarProps {
   tools?: number;
   tone: ToneId;
   onToneChange: (tone: ToneId) => void;
+  /** User-written modes, appended to the built-in tones. */
+  modes?: CustomMode[];
   image?: string | null | undefined;
   onPickImage?: ((file: File) => void) | undefined;
   onRemoveImage?: (() => void) | undefined;
@@ -109,6 +113,7 @@ export default function PromptBar({
   tools = 0,
   tone,
   onToneChange,
+  modes = [],
   image = null,
   onPickImage,
   onRemoveImage,
@@ -235,7 +240,9 @@ export default function PromptBar({
     }
   }, [appendTranscript]);
 
-  const ModeIcon = toneIcons[tone];
+  const tones = useMemo(() => toneOptions(modes), [modes]);
+  const activeTone = tones.find((option) => option.id === tone) ?? tones[0]!;
+  const ModeIcon = toneIcons[tone] ?? Sparkles;
   const canSend = busy || value.trim().length > 0 || !!image;
 
   return (
@@ -378,13 +385,13 @@ export default function PromptBar({
                 className="mx-1 flex items-center gap-1 rounded-full bg-secondary px-3 py-1.5 text-sm text-secondary-foreground transition-colors hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <ModeIcon size={14} />
-                {TONES.find((option) => option.id === tone)?.label ?? "Coach"}
+                {activeTone.label}
                 <ChevronDown size={15} />
               </button>
               {openPanel === "tone" && (
                 <Menu align="right" side={dropUp ? "up" : "down"} role="listbox" minWidth={170}>
-                  {TONES.map((option) => {
-                    const Icon = toneIcons[option.id];
+                  {tones.map((option) => {
+                    const Icon = toneIcons[option.id] ?? Sparkles;
                     return (
                       <MenuItem
                         key={option.id}

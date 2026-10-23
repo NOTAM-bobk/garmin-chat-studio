@@ -5,6 +5,7 @@ import {
   Loader2,
   Plug,
   ShieldCheck,
+  Sparkles,
   Trash2,
   TriangleAlert,
   Unplug,
@@ -17,11 +18,12 @@ import { Switch } from "@/components/ui/switch";
 import { hapticSupported, type HapticKind } from "@/lib/haptics";
 import type { Memory } from "@/lib/memory";
 import type { PuterAccount } from "@/lib/puter-sync";
-import type { ModelOption, ToneId } from "@/lib/models";
+import type { BuiltInToneId, ModelOption, ToneId } from "@/lib/models";
 import { TONES } from "@/lib/models";
+import { MODE_LIMIT, modeToneId, type CustomMode } from "@/lib/modes";
 import { cn } from "@/lib/utils";
 
-const TONE_HINTS: Record<ToneId, string> = {
+const TONE_HINTS: Record<BuiltInToneId, string> = {
   coach: "Direct, warm, one clear next step",
   analyst: "Numbers and deltas, minimal prose",
   explain: "Defines every metric it mentions",
@@ -52,6 +54,9 @@ export function SettingsDialog({
   syncState,
   onSignIn,
   onSignOut,
+  modes,
+  onCreateMode,
+  onDeleteMode,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -76,8 +81,15 @@ export function SettingsDialog({
   syncState: "idle" | "saving" | "saved" | "error";
   onSignIn: () => void;
   onSignOut: () => void;
+  modes: CustomMode[];
+  onCreateMode: (name: string, instruction: string) => void;
+  onDeleteMode: (id: string) => void;
 }) {
   const [confirmClear, setConfirmClear] = useState(false);
+  const [modeName, setModeName] = useState("");
+  const [modeInstruction, setModeInstruction] = useState("");
+  const modeFull = modes.length >= MODE_LIMIT;
+  const canSaveMode = !modeFull && modeName.trim().length > 0 && modeInstruction.trim().length > 0;
   const canVibrate = hapticSupported();
   const synced = account?.signedIn === true && !account.guest;
   const syncLabel = !account
@@ -175,11 +187,108 @@ export function SettingsDialog({
                       {selected && <Check className="size-3" />}
                     </span>
                     <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
-                      {TONE_HINTS[option.id]}
+                      {TONE_HINTS[option.id as BuiltInToneId]}
                     </span>
                   </button>
                 );
               })}
+            </div>
+          </Section>
+
+          <Section title="Your modes" hint="Write your own voice for the assistant.">
+            <div className="rounded-xl border border-border bg-card/60 p-3">
+              {modes.length > 0 && (
+                <ul className="mb-3 space-y-1.5">
+                  {modes.map((mode) => {
+                    const id = modeToneId(mode.id);
+                    const selected = tone === id;
+                    return (
+                      <li key={mode.id} className="flex items-start gap-2">
+                        <button
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => {
+                            onHapticTest("select");
+                            onToneChange(id);
+                          }}
+                          className={cn(
+                            "min-w-0 flex-1 rounded-lg border px-2.5 py-1.5 text-left transition-colors",
+                            selected
+                              ? "border-foreground/25 bg-accent"
+                              : "border-border/70 hover:bg-accent/50",
+                          )}
+                        >
+                          <span className="flex items-center gap-1.5 text-[12.5px] font-medium">
+                            {mode.name}
+                            {selected && <Check className="size-3" />}
+                          </span>
+                          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                            {mode.instruction}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete ${mode.name}`}
+                          onClick={() => onDeleteMode(mode.id)}
+                          className="mt-1 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
+                        >
+                          <Trash2 className="size-3" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!canSaveMode) return;
+                  onCreateMode(modeName, modeInstruction);
+                  setModeName("");
+                  setModeInstruction("");
+                }}
+                className="space-y-2"
+              >
+                <label
+                  htmlFor="mode-name"
+                  className="flex items-center gap-1.5 text-[11.5px] font-medium text-muted-foreground"
+                >
+                  <Sparkles className="size-3" />
+                  New mode
+                </label>
+                <input
+                  id="mode-name"
+                  value={modeName}
+                  maxLength={24}
+                  onChange={(event) => setModeName(event.target.value)}
+                  placeholder="Name — e.g. Race-week coach"
+                  className="w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-[12.5px] outline-none transition-colors focus:border-foreground/30"
+                />
+                <textarea
+                  value={modeInstruction}
+                  maxLength={280}
+                  rows={3}
+                  aria-label="How the mode should answer"
+                  onChange={(event) => setModeInstruction(event.target.value)}
+                  placeholder="How it should answer — e.g. You are my marathon coach. Keep every reply under 120 words, always end with tomorrow's session, and never sugar-coat a missed workout."
+                  className="w-full resize-none rounded-lg border border-border bg-background px-2.5 py-1.5 text-[12.5px] leading-relaxed outline-none transition-colors focus:border-foreground/30"
+                />
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 text-[10.5px] text-muted-foreground/70">
+                    {modeFull
+                      ? `Limit of ${MODE_LIMIT} modes reached. Delete one to add another.`
+                      : "Saved in this browser. Pick it from the tone menu by the composer."}
+                  </span>
+                  <button
+                    type="submit"
+                    disabled={!canSaveMode}
+                    className="shrink-0 rounded-lg bg-primary px-2.5 py-1 text-[11.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+                  >
+                    Save mode
+                  </button>
+                </div>
+              </form>
             </div>
           </Section>
 

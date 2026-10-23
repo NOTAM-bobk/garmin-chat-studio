@@ -41,6 +41,12 @@ type PuterGlobal = {
   auth: {
     isSignedIn: () => boolean;
     signIn: (o?: { attempt_temp_user_creation?: boolean }) => Promise<unknown>;
+    signOut: () => Promise<unknown>;
+    getUser: () => Promise<unknown>;
+  };
+  kv?: {
+    get: (key: string) => Promise<unknown>;
+    set: (key: string, value: unknown, options?: { disableSharing?: boolean }) => Promise<boolean>;
   };
 };
 

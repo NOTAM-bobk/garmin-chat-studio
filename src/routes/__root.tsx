@@ -12,6 +12,8 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { JsonLd } from "../components/seo/json-ld";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_TAGLINE, siteUrl } from "../lib/seo";
 
 function NotFoundComponent() {
   return (
@@ -78,21 +80,30 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Garmin Chat" },
+      { title: SITE_NAME },
+      { name: "description", content: SITE_DESCRIPTION },
       {
-        name: "description",
-        content:
-          "A clean chat with live read access to your Garmin Connect data — and a visible chain of thought.",
+        name: "robots",
+        content: "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1",
       },
-      { property: "og:title", content: "Garmin Chat" },
-      {
-        property: "og:description",
-        content:
-          "A clean chat with live read access to your Garmin Connect data — and a visible chain of thought.",
-      },
+      { name: "author", content: "Sawyer Schulz" },
+      { name: "application-name", content: SITE_NAME },
+      { property: "og:site_name", content: SITE_NAME },
+      { property: "og:locale", content: "en_US" },
+      { property: "og:title", content: SITE_NAME },
+      { property: "og:description", content: SITE_DESCRIPTION },
       { property: "og:type", content: "website" },
+      { property: "og:url", content: siteUrl("/") },
+      { property: "og:image", content: siteUrl("/icon-512.png") },
+      { property: "og:image:alt", content: `${SITE_NAME} — ${SITE_TAGLINE}` },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: SITE_NAME },
+      { name: "twitter:description", content: SITE_DESCRIPTION },
+      { name: "twitter:image", content: siteUrl("/icon-512.png") },
+      { name: "twitter:image:alt", content: `${SITE_NAME} — ${SITE_TAGLINE}` },
+      { property: "og:image:width", content: "512" },
+      { property: "og:image:height", content: "512" },
+      { name: "format-detection", content: "telephone=no" },
       { name: "theme-color", content: "#0e7490" },
       { name: "mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
@@ -114,6 +125,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "apple-touch-icon", href: "/apple-touch-icon.png", sizes: "180x180" },
       { rel: "manifest", href: "/manifest.webmanifest" },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "alternate", href: "/llms.txt", type: "text/plain", title: "llms.txt" },
+      { rel: "sitemap", href: "/sitemap.xml", type: "application/xml" },
     ],
   }),
   shellComponent: RootShell,
@@ -136,11 +149,36 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+const siteStructuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": siteUrl("/#website"),
+      name: SITE_NAME,
+      url: siteUrl("/"),
+      description: SITE_DESCRIPTION,
+      inLanguage: "en",
+    },
+    {
+      "@type": "SoftwareApplication",
+      name: SITE_NAME,
+      applicationCategory: "HealthApplication",
+      operatingSystem: "Web",
+      url: siteUrl("/"),
+      description: SITE_DESCRIPTION,
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+      publisher: { "@type": "Person", name: "Sawyer Schulz" },
+    },
+  ],
+};
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   return (
     <QueryClientProvider client={queryClient}>
+      <JsonLd data={siteStructuredData} />
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
     </QueryClientProvider>

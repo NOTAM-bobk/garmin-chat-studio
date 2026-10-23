@@ -97,33 +97,45 @@ function sanitizeMessage(raw: unknown): Message | null {
   };
 }
 
+/** Validate anything shaped like a chat list, so storage and cloud agree. */
+export function sanitizeChats(parsed: unknown): Chat[] {
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .map((raw): Chat | null => {
+      if (!raw || typeof raw !== "object") return null;
+      const record = raw as Record<string, unknown>;
+      const messages = Array.isArray(record["messages"])
+        ? record["messages"].map(sanitizeMessage).filter((message): message is Message => !!message)
+        : [];
+      if (messages.length === 0) return null;
+      return {
+        id: typeof record["id"] === "string" ? record["id"] : uid(),
+        title: typeof record["title"] === "string" ? record["title"] : "New chat",
+        messages,
+        updated: typeof record["updated"] === "number" ? record["updated"] : Date.now(),
+      };
+    })
+    .filter((chat): chat is Chat => !!chat)
+    .slice(0, MAX_CHATS);
+}
+
 export function loadChats(): Chat[] {
   if (typeof window === "undefined") return [];
   try {
-    const parsed = JSON.parse(localStorage.getItem(KEY) ?? "[]") as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((raw): Chat | null => {
-        if (!raw || typeof raw !== "object") return null;
-        const record = raw as Record<string, unknown>;
-        const messages = Array.isArray(record["messages"])
-          ? record["messages"]
-              .map(sanitizeMessage)
-              .filter((message): message is Message => !!message)
-          : [];
-        if (messages.length === 0) return null;
-        return {
-          id: typeof record["id"] === "string" ? record["id"] : uid(),
-          title: typeof record["title"] === "string" ? record["title"] : "New chat",
-          messages,
-          updated: typeof record["updated"] === "number" ? record["updated"] : Date.now(),
-        };
-      })
-      .filter((chat): chat is Chat => !!chat)
-      .slice(0, MAX_CHATS);
+    return sanitizeChats(JSON.parse(localStorage.getItem(KEY) ?? "[]") as unknown);
   } catch {
     return [];
   }
+}
+
+/** Union two chat lists by id, keeping the newer copy of each thread. */
+export function mergeChats(local: Chat[], remote: Chat[]): Chat[] {
+  const byId = new Map<string, Chat>();
+  for (const chat of [...local, ...remote]) {
+    const existing = byId.get(chat.id);
+    if (!existing || chat.updated > existing.updated) byId.set(chat.id, chat);
+  }
+  return [...byId.values()].sort((a, b) => b.updated - a.updated).slice(0, MAX_CHATS);
 }
 
 function withoutImages(chats: Chat[]): Chat[] {

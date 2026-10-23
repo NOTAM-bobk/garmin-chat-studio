@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import {
   Activity,
   ArrowUpRight,
+  BookOpen,
   CalendarDays,
   Check,
   ChevronDown,
@@ -65,7 +66,15 @@ import {
   type GarminTool,
   type ToolResult,
 } from "@/lib/garmin";
-import { loadChats, saveChats, uid, type Chat, type Message, type TraceStep } from "@/lib/chat";
+import {
+  loadChats,
+  mergeChats,
+  saveChats,
+  uid,
+  type Chat,
+  type Message,
+  type TraceStep,
+} from "@/lib/chat";
 import {
   CURATED_MODELS,
   DEFAULT_TONE,
@@ -102,6 +111,15 @@ import {
   suggestFollowups,
   type AgentMessage,
 } from "@/lib/puter";
+import {
+  SIGNED_OUT,
+  loadCloudChats,
+  readPuterAccount,
+  saveCloudChats,
+  signInToPuter,
+  signOutOfPuter,
+  type PuterAccount,
+} from "@/lib/puter-sync";
 import { useSteadyReveal } from "@/lib/useSteadyReveal";
 
 const TONE_KEY = "garmin-chat:tone";
@@ -298,6 +316,8 @@ export function ChatApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [account, setAccount] = useState<PuterAccount | null>(null);
+  const [syncState, setSyncState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [haptics, setHaptics] = useState(true);
   const [renamingChat, setRenamingChat] = useState<Chat | null>(null);
 
@@ -360,6 +380,41 @@ export function ChatApp() {
   useEffect(() => {
     if (hydrated) saveChats(chats);
   }, [chats, hydrated]);
+
+  // Puter.js keeps conversations only if the app asks it to: read the account
+  // and pull the cloud copy down when a real (non-temporary) user is signed in.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const next = await readPuterAccount();
+        if (cancelled) return;
+        setAccount(next);
+        if (!next.signedIn || next.guest) return;
+        const remote = await loadCloudChats();
+        if (cancelled || remote.length === 0) return;
+        setChats((previous) => mergeChats(previous, remote));
+        setSyncState("saved");
+      } catch {
+        if (!cancelled) setAccount(SIGNED_OUT);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Mirror every change to the user's Puter KV store, debounced past streaming.
+  useEffect(() => {
+    if (!hydrated || !account?.signedIn || account.guest) return;
+    const timer = window.setTimeout(() => {
+      setSyncState("saving");
+      void saveCloudChats(chats)
+        .then((result) => setSyncState(result === "saved" ? "saved" : "error"))
+        .catch(() => setSyncState("error"));
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [chats, hydrated, account]);
 
   useEffect(() => {
     memoriesRef.current = memories;
@@ -658,6 +713,45 @@ export function ChatApp() {
     const next = memoriesRef.current.filter((memory) => memory.id !== id);
     memoriesRef.current = next;
     setMemories(next);
+  }
+
+  /** Ask Puter for a real account so chats can live in their cloud store. */
+  async function startCloudSync() {
+    setSyncState("saving");
+    try {
+      const next = await signInToPuter();
+      setAccount(next);
+      if (next.signedIn && !next.guest) {
+        const remote = await loadCloudChats();
+        if (remote.length > 0) setChats((previous) => mergeChats(previous, remote));
+        setSyncState("saved");
+        toast("Chats now sync with your Puter account", {
+          description:
+            "Text history is saved across devices. Attached images stay in this browser.",
+        });
+      } else if (next.signedIn) {
+        setSyncState("idle");
+        toast("Still a temporary Puter session", {
+          description: "Finish creating a Puter account to keep chats in the cloud.",
+        });
+      } else {
+        setSyncState("idle");
+      }
+    } catch (caught) {
+      setSyncState("error");
+      toast.error("Puter sign-in didn't finish", { description: errorText(caught) });
+    }
+  }
+
+  async function stopCloudSync() {
+    try {
+      await signOutOfPuter();
+    } catch {
+      // Signing out is best effort; local state still resets.
+    }
+    setAccount(SIGNED_OUT);
+    setSyncState("idle");
+    toast("Signed out of Puter", { description: "Chats stay saved in this browser." });
   }
 
   async function requestTool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
@@ -1159,6 +1253,10 @@ export function ChatApp() {
         onClearChats={clearChats}
         memories={memories}
         onForgetMemory={(id) => forgetMemory(id)}
+        account={account}
+        syncState={syncState}
+        onSignIn={() => void startCloudSync()}
+        onSignOut={() => void stopCloudSync()}
       />
 
       <ShareDialog open={shareOpen} onOpenChange={setShareOpen} />
@@ -1368,6 +1466,14 @@ export function ChatApp() {
               <CircleHelp className="size-3.5" />
               How it works
             </button>
+            <a
+              href="/blog"
+              onClick={() => setMobileSidebar(false)}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <BookOpen className="size-3.5" />
+              Blog
+            </a>
             <a
               href="https://fundrazr.com/62nDBa"
               target="_blank"

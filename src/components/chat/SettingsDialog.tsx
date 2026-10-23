@@ -1,10 +1,22 @@
 import { useState, type ReactNode } from "react";
-import { Check, Plug, ShieldCheck, Trash2, TriangleAlert, Unplug, Vibrate, X } from "lucide-react";
+import {
+  Check,
+  Cloud,
+  Loader2,
+  Plug,
+  ShieldCheck,
+  Trash2,
+  TriangleAlert,
+  Unplug,
+  Vibrate,
+  X,
+} from "lucide-react";
 
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { hapticSupported, type HapticKind } from "@/lib/haptics";
 import type { Memory } from "@/lib/memory";
+import type { PuterAccount } from "@/lib/puter-sync";
 import type { ModelOption, ToneId } from "@/lib/models";
 import { TONES } from "@/lib/models";
 import { cn } from "@/lib/utils";
@@ -36,6 +48,10 @@ export function SettingsDialog({
   onClearChats,
   memories,
   onForgetMemory,
+  account,
+  syncState,
+  onSignIn,
+  onSignOut,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -56,9 +72,30 @@ export function SettingsDialog({
   onClearChats: () => void;
   memories: Memory[];
   onForgetMemory: (id: string) => void;
+  account: PuterAccount | null;
+  syncState: "idle" | "saving" | "saved" | "error";
+  onSignIn: () => void;
+  onSignOut: () => void;
 }) {
   const [confirmClear, setConfirmClear] = useState(false);
   const canVibrate = hapticSupported();
+  const synced = account?.signedIn === true && !account.guest;
+  const syncLabel = !account
+    ? "Checking Puter…"
+    : synced
+      ? `Signed in as ${account.username ?? "your Puter account"}`
+      : account.signedIn
+        ? "Temporary Puter session"
+        : "Not signed in";
+  const syncNote = synced
+    ? syncState === "saving"
+      ? "Saving the latest changes to your Puter account…"
+      : syncState === "error"
+        ? "The last sync failed. It retries with your next change."
+        : "Text history syncs to your Puter account. Attached images stay in this browser."
+    : account?.signedIn
+      ? "Temporary accounts are deleted with the session. Create a Puter account to keep chats across devices."
+      : "Sign in with Puter to keep chats across devices. Nothing leaves this browser until you do.";
 
   return (
     <Dialog
@@ -198,6 +235,44 @@ export function SettingsDialog({
                   One sign-in through the MissingMCP gateway. Your Garmin password is never stored.
                 </p>
               )}
+            </div>
+          </Section>
+
+          <Section
+            title="Cloud sync"
+            hint="Keep chats in your Puter account, not just this browser."
+          >
+            <div className="rounded-xl border border-border bg-card/60 p-3">
+              <div className="flex items-center gap-2">
+                <Cloud className="size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate text-[13px]">{syncLabel}</span>
+                {synced ? (
+                  <button
+                    type="button"
+                    onClick={onSignOut}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    Sign out
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onSignIn}
+                    disabled={syncState === "saving"}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-2.5 py-1 text-[11.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+                  >
+                    {syncState === "saving" ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Cloud className="size-3" />
+                    )}
+                    Sign in
+                  </button>
+                )}
+              </div>
+              <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
+                {syncNote}
+              </p>
             </div>
           </Section>
 

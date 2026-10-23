@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as UpgradeRouteImport } from './routes/upgrade'
 import { Route as ApiGarminCallRouteImport } from './routes/api/garmin/call'
 import { Route as ApiGarminCallbackRouteImport } from './routes/api/garmin/callback'
 import { Route as ApiGarminConnectRouteImport } from './routes/api/garmin/connect'
@@ -20,6 +21,11 @@ import { Route as ApiGarminToolsRouteImport } from './routes/api/garmin/tools'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UpgradeRoute = UpgradeRouteImport.update({
+  id: '/upgrade',
+  path: '/upgrade',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiGarminCallRoute = ApiGarminCallRouteImport.update({
@@ -55,6 +61,7 @@ const ApiGarminToolsRoute = ApiGarminToolsRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/upgrade': typeof UpgradeRoute
   '/api/garmin/call': typeof ApiGarminCallRoute
   '/api/garmin/callback': typeof ApiGarminCallbackRoute
   '/api/garmin/connect': typeof ApiGarminConnectRoute
@@ -64,6 +71,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/upgrade': typeof UpgradeRoute
   '/api/garmin/call': typeof ApiGarminCallRoute
   '/api/garmin/callback': typeof ApiGarminCallbackRoute
   '/api/garmin/connect': typeof ApiGarminConnectRoute
@@ -74,6 +82,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/upgrade': typeof UpgradeRoute
   '/api/garmin/call': typeof ApiGarminCallRoute
   '/api/garmin/callback': typeof ApiGarminCallbackRoute
   '/api/garmin/connect': typeof ApiGarminConnectRoute
@@ -85,6 +94,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/upgrade'
     | '/api/garmin/call'
     | '/api/garmin/callback'
     | '/api/garmin/connect'
@@ -94,6 +104,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/upgrade'
     | '/api/garmin/call'
     | '/api/garmin/callback'
     | '/api/garmin/connect'
@@ -103,6 +114,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/upgrade'
     | '/api/garmin/call'
     | '/api/garmin/callback'
     | '/api/garmin/connect'
@@ -113,6 +125,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  UpgradeRoute: typeof UpgradeRoute
   ApiGarminCallRoute: typeof ApiGarminCallRoute
   ApiGarminCallbackRoute: typeof ApiGarminCallbackRoute
   ApiGarminConnectRoute: typeof ApiGarminConnectRoute
@@ -128,6 +141,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/upgrade': {
+      id: '/upgrade'
+      path: '/upgrade'
+      fullPath: '/upgrade'
+      preLoaderRoute: typeof UpgradeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/garmin/call': {
@@ -177,6 +197,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  UpgradeRoute: UpgradeRoute,
   ApiGarminCallRoute: ApiGarminCallRoute,
   ApiGarminCallbackRoute: ApiGarminCallbackRoute,
   ApiGarminConnectRoute: ApiGarminConnectRoute,

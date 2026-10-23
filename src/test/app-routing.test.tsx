@@ -14,4 +14,12 @@ describe("App routing", () => {
 
     expect(matches.at(-1)?.routeId).not.toBe(rootRouteId);
   });
+
+  it("serves the upgrade screen at /upgrade", () => {
+    const router = createRouter({ routeTree, context: { queryClient: new QueryClient() } });
+
+    const matches = router.matchRoutes("/upgrade");
+
+    expect(matches.at(-1)?.routeId).toBe("/upgrade");
+  });
 });

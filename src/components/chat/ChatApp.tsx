@@ -24,6 +24,7 @@ import {
   RotateCcw,
   Route,
   Settings2,
+  Share2,
   Sparkles,
   SquarePen,
   ThumbsDown,
@@ -42,6 +43,7 @@ import { OnboardingDialog } from "@/components/chat/OnboardingDialog";
 import PromptBar from "@/components/chat/PromptBar";
 import { RenameDialog } from "@/components/chat/RenameDialog";
 import { SettingsDialog } from "@/components/chat/SettingsDialog";
+import { ShareDialog } from "@/components/chat/ShareDialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,6 +72,7 @@ import {
   type ModelOption,
   type ToneId,
 } from "@/lib/models";
+import { APP_VERSION, BUILDER } from "@/lib/app-meta";
 import { prepareImage } from "@/lib/image";
 import {
   MEMORY_LIMIT,
@@ -289,6 +292,7 @@ export function ChatApp() {
   const [hydrated, setHydrated] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [haptics, setHaptics] = useState(true);
   const [renamingChat, setRenamingChat] = useState<Chat | null>(null);
 
@@ -1151,6 +1155,8 @@ export function ChatApp() {
         onForgetMemory={(id) => forgetMemory(id)}
       />
 
+      <ShareDialog open={shareOpen} onOpenChange={setShareOpen} />
+
       <RenameDialog
         open={!!renamingChat}
         initialTitle={renamingChat?.title ?? ""}
@@ -1191,6 +1197,23 @@ export function ChatApp() {
           >
             <SquarePen className="size-[18px]" />
           </button>
+        </div>
+
+        <div className="px-2 pb-2">
+          <a
+            href="/upgrade"
+            onClick={() => {
+              haptic("tap");
+              setMobileSidebar(false);
+            }}
+            className="group flex items-center gap-2 rounded-xl border border-sidebar-border bg-brand-soft px-2.5 py-2 text-[13px] font-medium text-brand-ink transition-colors hover:bg-brand-soft/70"
+          >
+            <Sparkles className="size-4" strokeWidth={2.1} />
+            Upgrade
+            <span className="ml-auto rounded-full bg-card/70 px-1.5 py-0.5 text-[10px] font-normal text-brand-ink/80">
+              Starter
+            </span>
+          </a>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
@@ -1281,6 +1304,17 @@ export function ChatApp() {
             <button
               onClick={() => {
                 haptic("tap");
+                setShareOpen(true);
+                setMobileSidebar(false);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <Share2 className="size-3.5" />
+              Share
+            </button>
+            <button
+              onClick={() => {
+                haptic("tap");
                 setSettingsOpen(true);
                 setMobileSidebar(false);
               }}
@@ -1306,6 +1340,11 @@ export function ChatApp() {
               Donate
               <ArrowUpRight className="ml-auto size-3 opacity-60" />
             </a>
+          </div>
+
+          <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-sidebar-border/60 px-2 pt-2 pb-0.5 text-[10.5px] text-muted-foreground/70">
+            <span className="truncate">Built by {BUILDER}</span>
+            <span className="shrink-0 font-mono">v{APP_VERSION}</span>
           </div>
         </div>
       </aside>
@@ -1419,7 +1458,11 @@ export function ChatApp() {
                   key={suggestion.title}
                   onClick={() => void send(suggestion.prompt)}
                   style={{ animationDelay: `${index * 70}ms` }}
-                  className="animate-in fade-in-0 fill-mode-both slide-in-from-bottom-1 inline-flex items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-[13px] text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:bg-accent hover:text-foreground hover:shadow-sm"
+                  className={cn(
+                    "animate-in fade-in-0 fill-mode-both slide-in-from-bottom-1 items-center gap-1.5 rounded-full border border-border px-3.5 py-2 text-[13px] text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:bg-accent hover:text-foreground hover:shadow-sm",
+                    // Phones get three suggestions; the fourth is desktop-only.
+                    index === PRESET_COUNT - 1 ? "hidden sm:inline-flex" : "inline-flex",
+                  )}
                 >
                   <suggestion.icon className="size-3.5" strokeWidth={1.9} />
                   {suggestion.title}

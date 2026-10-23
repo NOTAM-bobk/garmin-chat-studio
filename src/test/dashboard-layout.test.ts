@@ -5,8 +5,8 @@ import { DEFAULT_LAYOUT, moveWidget, parseLayout, updateWidget } from "@/lib/das
 describe("dashboard layout", () => {
   it("moves a widget one place", () => {
     const next = moveWidget(DEFAULT_LAYOUT, "battery", -1);
-    expect(next[0].id).toBe("battery");
-    expect(next[1].id).toBe("readiness");
+    expect(next[0]?.id).toBe("battery");
+    expect(next[1]?.id).toBe("readiness");
   });
 
   it("does not move past the edges", () => {

@@ -27,7 +27,7 @@ export function moveWidget(layout: WidgetSlot[], id: WidgetId, dir: -1 | 1): Wid
   const j = i + dir;
   if (i < 0 || j < 0 || j >= layout.length) return layout;
   const next = [...layout];
-  [next[i], next[j]] = [next[j], next[i]];
+  [next[i], next[j]] = [next[j]!, next[i]!];
   return next;
 }
 

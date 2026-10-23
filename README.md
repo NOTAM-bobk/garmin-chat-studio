@@ -7,8 +7,10 @@ and every tool it is reading in real time, and keeps the Garmin token on the ser
 - **Garmin in the chat** — sleep, HRV, Body Battery, readiness, activities, load, workouts.
 - **Visible work** — the model's reasoning streams in as faint inline text, and every Garmin tool
   it touches is listed by name ("get_sleep_summary_range") with live status and timing.
-- **Charts on request** — the assistant can answer with a line, bar or area chart by emitting a
-  validated ```chart block, rendered with recharts from the numbers it actually retrieved.
+- **Charts on request** — the assistant can answer with a line, bar, area or pie chart by emitting a
+  validated ```chart block, rendered with recharts from the numbers it actually retrieved. Optional
+  targets, a second y-axis for mismatched scales, latest-value summaries and unit-aware tooltips
+  keep the numbers readable without hovering.
 - **Tone presets** — Coach, Analyst, Explain and Straight talk, saved in this browser.
 - **Model picker** — curated models first, then Puter's live catalogue via `puter.ai.listModels()`,
   plus copy / regenerate / thumbs actions under every answer.

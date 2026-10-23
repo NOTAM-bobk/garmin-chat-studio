@@ -19,7 +19,7 @@ beforeEach(() => {
             id: "a1",
             role: "assistant",
             content:
-              'Sleep is trending up.\n\n```chart\n{"type":"bar","title":"Sleep score","unit":"score","x":["Mon","Tue","Wed"],"series":[{"name":"Score","data":[72,80,84]}]}\n```',
+              'Sleep is trending up.\n\n```chart\n{"type":"bar","title":"Sleep score","unit":"score","x":["Mon","Tue","Wed"],"series":[{"name":"Score","data":[72,80,84]}],"target":80,"targetLabel":"Goal 80"}\n```',
             steps: [],
           },
         ],
@@ -35,5 +35,13 @@ describe("chart blocks", () => {
 
     expect(await screen.findByText("Sleep score")).toBeInTheDocument();
     expect(screen.queryByText(/"type":"bar"/)).not.toBeInTheDocument();
+  });
+
+  it("shows the latest reading and its move without hovering", async () => {
+    render(<ChatApp />);
+    fireEvent.click(await screen.findByText("Sleep trend"));
+
+    expect(await screen.findByText("84 score")).toBeInTheDocument();
+    expect(await screen.findByText(/since Mon/)).toBeInTheDocument();
   });
 });

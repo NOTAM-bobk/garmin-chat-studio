@@ -10,13 +10,21 @@ import {
   LineChart,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 
-import type { ChartSpec } from "@/lib/chart";
+import {
+  axisValues,
+  chartBounds,
+  formatChartValue,
+  seriesChange,
+  type ChartSeries,
+  type ChartSpec,
+} from "@/lib/chart";
 
 const SERIES_COLORS = [
   "var(--color-chart-1)",
@@ -26,10 +34,30 @@ const SERIES_COLORS = [
   "var(--color-chart-5)",
 ];
 
+const TOOLTIP_STYLE = {
+  fontSize: 12,
+  borderRadius: 10,
+  border: "1px solid var(--color-border)",
+  background: "var(--color-card)",
+  color: "var(--color-card-foreground)",
+};
+
+function withUnit(value: number, unit?: string): string {
+  const text = formatChartValue(value);
+  if (!unit) return text;
+  return unit === "%" ? `${text}%` : `${text} ${unit}`;
+}
+
+function seriesAxis(series: ChartSeries): "left" | "right" {
+  return series.axis === "right" ? "right" : "left";
+}
+
 /** Render a chart the assistant asked for, using the shared theme tokens. */
 export function ChatChart({ spec }: { spec: ChartSpec }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  const hasRightAxis = spec.series.some((series) => seriesAxis(series) === "right");
 
   const rows = useMemo(
     () =>
@@ -43,13 +71,53 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
     [spec],
   );
 
-  const slices = useMemo(
-    () =>
-      spec.x.map((label, index) => ({
+  const slices = useMemo(() => {
+    const total = spec.x.reduce(
+      (sum, _, index) => sum + Math.abs(spec.series[0]?.data[index] ?? 0),
+      0,
+    );
+    return spec.x.map((label, index) => {
+      const value = spec.series[0]?.data[index] ?? 0;
+      return {
         label,
-        value: spec.series[0]?.data[index] ?? 0,
-      })),
+        value,
+        share: total > 0 ? Math.round((Math.abs(value) / total) * 100) : 0,
+      };
+    });
+  }, [spec]);
+
+  const stats = useMemo(
+    () =>
+      spec.type === "pie"
+        ? []
+        : spec.series.flatMap((series, index) => {
+            const change = seriesChange(series);
+            if (!change) return [];
+            return [
+              {
+                name: series.name ?? `Series ${index + 1}`,
+                last: change.last,
+                delta: change.delta,
+              },
+            ];
+          }),
     [spec],
+  );
+
+  const leftValues = useMemo(() => {
+    const values = axisValues(spec, "left");
+    return spec.target !== undefined ? [...values, spec.target] : values;
+  }, [spec]);
+
+  const rightValues = useMemo(() => axisValues(spec, "right"), [spec]);
+
+  const leftDomain = useMemo(
+    () => chartBounds(leftValues, spec.type !== "line"),
+    [leftValues, spec.type],
+  );
+  const rightDomain = useMemo(
+    () => chartBounds(rightValues, spec.type !== "line"),
+    [rightValues, spec.type],
   );
 
   const axisProps = {
@@ -58,29 +126,59 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
     axisLine: false,
   } as const;
 
+  const tooltip = (
+    <Tooltip
+      cursor={{ stroke: "var(--color-border)" }}
+      contentStyle={TOOLTIP_STYLE}
+      labelStyle={{ color: "var(--color-muted-foreground)", fontSize: 11 }}
+      formatter={(value, name) => [withUnit(Number(value), spec.unit), name]}
+    />
+  );
+
   const plot = (
     <>
       <CartesianGrid vertical={false} stroke="var(--color-border)" strokeDasharray="3 3" />
       <XAxis dataKey="label" interval="preserveStartEnd" minTickGap={18} {...axisProps} />
-      <YAxis width={38} {...axisProps} />
-      <Tooltip
-        cursor={{ stroke: "var(--color-border)" }}
-        contentStyle={{
-          fontSize: 12,
-          borderRadius: 10,
-          border: "1px solid var(--color-border)",
-          background: "var(--color-card)",
-          color: "var(--color-card-foreground)",
-        }}
-        labelStyle={{ color: "var(--color-muted-foreground)", fontSize: 11 }}
+      <YAxis
+        yAxisId="left"
+        width={38}
+        domain={leftDomain}
+        tickFormatter={formatChartValue}
+        {...axisProps}
       />
+      {hasRightAxis && (
+        <YAxis
+          yAxisId="right"
+          orientation="right"
+          width={38}
+          domain={rightDomain}
+          tickFormatter={formatChartValue}
+          {...axisProps}
+        />
+      )}
+      {spec.target !== undefined && (
+        <ReferenceLine
+          y={spec.target}
+          yAxisId="left"
+          stroke="var(--color-muted-foreground)"
+          strokeDasharray="4 4"
+          strokeWidth={1}
+          label={{
+            value: spec.targetLabel ?? formatChartValue(spec.target),
+            position: "insideTopRight",
+            fontSize: 10,
+            fill: "var(--color-muted-foreground)",
+          }}
+        />
+      )}
+      {tooltip}
     </>
   );
 
   const legend =
     spec.type === "pie"
       ? slices.map((slice, index) => ({
-          label: `${slice.label} · ${slice.value}${spec.unit ?? ""}`,
+          label: `${slice.label} · ${withUnit(slice.value, spec.unit)} · ${slice.share}%`,
           color: SERIES_COLORS[index % SERIES_COLORS.length],
         }))
       : spec.series.length > 1
@@ -91,7 +189,10 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
         : [];
 
   return (
-    <figure className="my-4 overflow-hidden rounded-xl border border-border bg-card p-3">
+    <figure
+      aria-label={spec.title ?? "Chart"}
+      className="my-4 overflow-hidden rounded-xl border border-border bg-card p-3"
+    >
       {(spec.title || spec.unit) && (
         <figcaption className="mb-2 flex items-baseline gap-2 px-1">
           {spec.title && <span className="text-[12.5px] font-medium">{spec.title}</span>}
@@ -101,6 +202,23 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
             </span>
           )}
         </figcaption>
+      )}
+
+      {stats.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 px-1">
+          {stats.map((stat) => (
+            <span key={stat.name} className="inline-flex items-baseline gap-1.5 text-[11px]">
+              {spec.series.length > 1 && <span className="text-muted-foreground">{stat.name}</span>}
+              <span className="font-medium tabular-nums">{withUnit(stat.last, spec.unit)}</span>
+              {stat.delta !== 0 && (
+                <span className="tabular-nums text-muted-foreground">
+                  {stat.delta > 0 ? "↑" : "↓"} {withUnit(Math.abs(stat.delta), spec.unit)} since{" "}
+                  {spec.x[0]}
+                </span>
+              )}
+            </span>
+          ))}
+        </div>
       )}
 
       <div className="h-[220px] w-full">
@@ -123,13 +241,8 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
                   ))}
                 </Pie>
                 <Tooltip
-                  contentStyle={{
-                    fontSize: 12,
-                    borderRadius: 10,
-                    border: "1px solid var(--color-border)",
-                    background: "var(--color-card)",
-                    color: "var(--color-card-foreground)",
-                  }}
+                  contentStyle={TOOLTIP_STYLE}
+                  formatter={(value, name) => [withUnit(Number(value), spec.unit), name]}
                 />
               </PieChart>
             ) : spec.type === "bar" ? (
@@ -138,6 +251,7 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
                 {spec.series.map((series, index) => (
                   <Bar
                     key={index}
+                    yAxisId={seriesAxis(series)}
                     dataKey={`s${index}`}
                     name={series.name ?? `Series ${index + 1}`}
                     fill={SERIES_COLORS[index % SERIES_COLORS.length]}
@@ -152,6 +266,7 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
                 {spec.series.map((series, index) => (
                   <Area
                     key={index}
+                    yAxisId={seriesAxis(series)}
                     type="monotone"
                     dataKey={`s${index}`}
                     name={series.name ?? `Series ${index + 1}`}
@@ -169,6 +284,7 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
                 {spec.series.map((series, index) => (
                   <Line
                     key={index}
+                    yAxisId={seriesAxis(series)}
                     type="monotone"
                     dataKey={`s${index}`}
                     name={series.name ?? `Series ${index + 1}`}

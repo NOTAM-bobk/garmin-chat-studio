@@ -24,7 +24,7 @@ import { MODE_LIMIT, modeToneId, type CustomMode } from "@/lib/modes";
 import { cn } from "@/lib/utils";
 
 const TONE_HINTS: Record<BuiltInToneId, string> = {
-  coach: "Direct, warm, one clear next step",
+  coach: "Direct, warm, matches the answer to the question",
   analyst: "Numbers and deltas, minimal prose",
   explain: "Defines every metric it mentions",
   straight: "Blunt, no praise, no hedging",

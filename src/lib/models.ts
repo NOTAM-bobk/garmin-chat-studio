@@ -74,7 +74,7 @@ export const TONES: Tone[] = [
     id: "coach",
     label: "Coach",
     prompt:
-      "Tone: a sharp endurance coach. Warm, direct, zero filler. Name the one thing that matters most, then the next action.",
+      "Tone: a sharp endurance coach. Warm, direct, zero filler. Answer the question in the shape it needs — a fast verdict for a check-in, the full plan for a plan — and give a single next action only when the user is deciding what to do.",
   },
   {
     id: "analyst",

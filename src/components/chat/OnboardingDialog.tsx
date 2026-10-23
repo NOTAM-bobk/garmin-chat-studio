@@ -36,7 +36,7 @@ const SLIDES: Slide[] = [
   },
   {
     title: "Connect when you're ready",
-    body: "One Garmin sign-in through the MissingMCP gateway. Your password is never stored and data is read on demand.",
+    body: "Sign in once through the MissingMCP gateway, or paste a personal API key from Garmin's developer program. Your password is never stored and data is read on demand.",
     art: "plug",
   },
 ];

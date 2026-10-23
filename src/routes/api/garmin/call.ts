@@ -2,12 +2,18 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import {
   SESSION_COOKIE,
+  bakeCookie,
   callTool,
   clearCookie,
   cookieDomain,
   jsonResponse,
   readSession,
+  requestOrigin,
+  seal,
 } from "@/server/garmin.server";
+import { PERSONAL_COOKIE, callPersonalTool, readPersonalSession } from "@/server/garmin-key.server";
+
+const PERSONAL_MAX_AGE = 60 * 60 * 24 * 180;
 
 type CallBody = { name?: unknown; arguments?: unknown };
 
@@ -16,9 +22,6 @@ export const Route = createFileRoute("/api/garmin/call")({
     handlers: {
       POST: async ({ request }) => {
         const session = await readSession(request);
-        if (!session) {
-          return jsonResponse({ error: "Garmin isn't connected." }, 401);
-        }
 
         let body: CallBody;
         try {
@@ -35,8 +38,31 @@ export const Route = createFileRoute("/api/garmin/call")({
             ? (body.arguments as Record<string, unknown>)
             : {};
 
+        const personal = session ? null : await readPersonalSession(request);
+        if (!session && !personal) {
+          return jsonResponse({ error: "Garmin isn't connected." }, 401);
+        }
+
         try {
-          const result = await callTool(session.accessToken, body.name, args);
+          if (personal) {
+            const { result, session: refreshed } = await callPersonalTool(
+              personal,
+              body.name,
+              args,
+            );
+            // A rotated token is re-sealed so the next call skips the exchange.
+            if (refreshed.token === personal.token) return jsonResponse(result);
+            const domain = cookieDomain(request);
+            return jsonResponse(result, 200, [
+              bakeCookie(PERSONAL_COOKIE, await seal(refreshed), {
+                maxAge: PERSONAL_MAX_AGE,
+                secure: requestOrigin(request).startsWith("https://"),
+                ...(domain ? { domain } : {}),
+              }),
+            ]);
+          }
+
+          const result = await callTool(session!.accessToken, body.name, args);
           return jsonResponse(result);
         } catch (error) {
           const message = error instanceof Error ? error.message : "The Garmin tool failed.";
@@ -44,7 +70,7 @@ export const Route = createFileRoute("/api/garmin/call")({
           return jsonResponse(
             { error: message, expired },
             expired ? 401 : 502,
-            expired ? [clearCookie(SESSION_COOKIE, cookieDomain(request))] : [],
+            expired && session ? [clearCookie(SESSION_COOKIE, cookieDomain(request))] : [],
           );
         }
       },

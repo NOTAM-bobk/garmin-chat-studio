@@ -8,6 +8,7 @@ import {
   jsonResponse,
   readSession,
 } from "@/server/garmin.server";
+import { PERSONAL_TOOLS, readPersonalSession } from "@/server/garmin-key.server";
 
 export const Route = createFileRoute("/api/garmin/tools")({
   server: {
@@ -15,6 +16,11 @@ export const Route = createFileRoute("/api/garmin/tools")({
       GET: async ({ request }) => {
         const session = await readSession(request);
         if (!session) {
+          // A personal key reads the same data through a fixed read-only set.
+          const personal = await readPersonalSession(request);
+          if (personal) {
+            return jsonResponse({ tools: PERSONAL_TOOLS, available: PERSONAL_TOOLS.length });
+          }
           return jsonResponse({ error: "Garmin isn't connected." }, 401);
         }
         try {

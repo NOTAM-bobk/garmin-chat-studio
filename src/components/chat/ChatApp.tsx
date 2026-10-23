@@ -131,6 +131,7 @@ import {
   type PuterAccount,
 } from "@/lib/puter-sync";
 import { useSteadyReveal } from "@/lib/useSteadyReveal";
+import { ConnectDialog } from "@/components/chat/ConnectDialog";
 
 const TONE_KEY = "garmin-chat:tone";
 const MODEL_KEY = "garmin-chat:model";
@@ -222,6 +223,11 @@ function systemPrompt(
   const image = hasImage
     ? "The latest user message carries an image. Read it before answering and use it as primary evidence for that turn."
     : "No image is attached to the latest message.";
+  // Personal API keys are read-only by Garmin's own terms, so promise nothing else.
+  const writes =
+    status?.mode === "personal"
+      ? "This account is connected with a personal API key, which is read-only: you can read data but cannot create, upload or schedule workouts. Say that plainly instead of implying you did."
+      : "You may create and schedule workouts when asked. State exactly what you created.";
 
   return `You are Garmin Chat, a training analyst with live read access to the user's Garmin Connect account through MCP tools.
 Today is ${weekday}, ${today}. ${connection}
@@ -239,7 +245,7 @@ How to answer:
 - Cross-check related signals (sleep, HRV, resting HR, load, readiness) before recommending a change. If two signals disagree, name the conflict and say which one you trust.
 - When data is thin or a tool fails, say exactly what is missing and what you can still conclude.
 - When the user asks for a diagnosis or a recommendation, commit: the most likely explanation and what you would do. Do not hedge across maybes.
-- You may create and schedule workouts when asked. State exactly what you created.
+- ${writes}
 - This is training guidance, not medical advice. Keep any safety note to a single short line.
 
 Answer shape — read the question first, then pick the structure it needs; do not reuse one template every time:
@@ -352,6 +358,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
   const [hydrated, setHydrated] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [account, setAccount] = useState<PuterAccount | null>(null);
@@ -561,25 +568,21 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     }
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const response = await fetch("/api/garmin/status", { cache: "no-store" });
-        const payload = (await response.json()) as GarminStatus;
-        if (cancelled) return;
-        setStatus(payload);
-        if (payload.connected) await refreshTools();
-      } catch {
-        if (!cancelled) {
-          setStatus({ connected: false, configured: true, tools: 0, available: 0 });
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  /** Re-read the connection, so a fresh key or sign-in shows up immediately. */
+  const refreshStatus = useCallback(async () => {
+    try {
+      const response = await fetch("/api/garmin/status", { cache: "no-store" });
+      const payload = (await response.json()) as GarminStatus;
+      setStatus(payload);
+      if (payload.connected) await refreshTools();
+    } catch {
+      setStatus({ connected: false, configured: true, tools: 0, available: 0 });
+    }
   }, [refreshTools]);
+
+  useEffect(() => {
+    void refreshStatus();
+  }, [refreshStatus]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1380,7 +1383,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
       placeholder={connected ? "Ask about your training" : "Ask anything"}
       onNewChat={newChat}
       onOpenSettings={() => setSettingsOpen(true)}
-      onConnect={connectGarmin}
+      onConnect={() => setConnectOpen(true)}
       textareaRef={textareaRef}
       dropUp={!!activeChat}
     />
@@ -1398,7 +1401,26 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         tools={toolsAvailable}
         onConnect={() => {
           closeWelcome();
+          setConnectOpen(true);
+        }}
+      />
+
+      <ConnectDialog
+        open={connectOpen}
+        onOpenChange={setConnectOpen}
+        configured={status?.configured ?? true}
+        onMcp={() => {
+          setConnectOpen(false);
           connectGarmin();
+        }}
+        onConnected={() => {
+          setConnectOpen(false);
+          haptic("done");
+          toast.success("Garmin connected with your key", {
+            description:
+              "Read-only access to your Garmin data. Create a new key when this one expires.",
+          });
+          void refreshStatus();
         }}
       />
 
@@ -1417,7 +1439,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         tools={toolsAvailable}
         onConnect={() => {
           setSettingsOpen(false);
-          connectGarmin();
+          setConnectOpen(true);
         }}
         onDisconnect={() => void disconnectGarmin()}
         haptics={haptics}

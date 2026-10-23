@@ -341,7 +341,8 @@ export function SettingsDialog({
                 </p>
               ) : (
                 <p className="mt-2 text-[11.5px] leading-relaxed text-muted-foreground">
-                  One sign-in through the MissingMCP gateway. Your Garmin password is never stored.
+                  Connect through the MissingMCP gateway, or paste your own Garmin personal API key.
+                  Your Garmin password is never stored.
                 </p>
               )}
             </div>

@@ -23,6 +23,7 @@ import { Route as ApiGarminCallRouteImport } from './routes/api/garmin/call'
 import { Route as ApiGarminCallbackRouteImport } from './routes/api/garmin/callback'
 import { Route as ApiGarminConnectRouteImport } from './routes/api/garmin/connect'
 import { Route as ApiGarminDisconnectRouteImport } from './routes/api/garmin/disconnect'
+import { Route as ApiGarminKeyRouteImport } from './routes/api/garmin/key'
 import { Route as ApiGarminStatusRouteImport } from './routes/api/garmin/status'
 import { Route as ApiGarminToolsRouteImport } from './routes/api/garmin/tools'
 import { Route as ApiWebReadRouteImport } from './routes/api/web/read'
@@ -98,6 +99,11 @@ const ApiGarminDisconnectRoute = ApiGarminDisconnectRouteImport.update({
   path: '/api/garmin/disconnect',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiGarminKeyRoute = ApiGarminKeyRouteImport.update({
+  id: '/api/garmin/key',
+  path: '/api/garmin/key',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiGarminStatusRoute = ApiGarminStatusRouteImport.update({
   id: '/api/garmin/status',
   path: '/api/garmin/status',
@@ -134,6 +140,7 @@ export interface FileRoutesByFullPath {
   '/api/garmin/callback': typeof ApiGarminCallbackRoute
   '/api/garmin/connect': typeof ApiGarminConnectRoute
   '/api/garmin/disconnect': typeof ApiGarminDisconnectRoute
+  '/api/garmin/key': typeof ApiGarminKeyRoute
   '/api/garmin/status': typeof ApiGarminStatusRoute
   '/api/garmin/tools': typeof ApiGarminToolsRoute
   '/api/web/read': typeof ApiWebReadRoute
@@ -154,6 +161,7 @@ export interface FileRoutesByTo {
   '/api/garmin/callback': typeof ApiGarminCallbackRoute
   '/api/garmin/connect': typeof ApiGarminConnectRoute
   '/api/garmin/disconnect': typeof ApiGarminDisconnectRoute
+  '/api/garmin/key': typeof ApiGarminKeyRoute
   '/api/garmin/status': typeof ApiGarminStatusRoute
   '/api/garmin/tools': typeof ApiGarminToolsRoute
   '/api/web/read': typeof ApiWebReadRoute
@@ -175,6 +183,7 @@ export interface FileRoutesById {
   '/api/garmin/callback': typeof ApiGarminCallbackRoute
   '/api/garmin/connect': typeof ApiGarminConnectRoute
   '/api/garmin/disconnect': typeof ApiGarminDisconnectRoute
+  '/api/garmin/key': typeof ApiGarminKeyRoute
   '/api/garmin/status': typeof ApiGarminStatusRoute
   '/api/garmin/tools': typeof ApiGarminToolsRoute
   '/api/web/read': typeof ApiWebReadRoute
@@ -197,6 +206,7 @@ export interface FileRouteTypes {
     | '/api/garmin/callback'
     | '/api/garmin/connect'
     | '/api/garmin/disconnect'
+    | '/api/garmin/key'
     | '/api/garmin/status'
     | '/api/garmin/tools'
     | '/api/web/read'
@@ -217,6 +227,7 @@ export interface FileRouteTypes {
     | '/api/garmin/callback'
     | '/api/garmin/connect'
     | '/api/garmin/disconnect'
+    | '/api/garmin/key'
     | '/api/garmin/status'
     | '/api/garmin/tools'
     | '/api/web/read'
@@ -237,6 +248,7 @@ export interface FileRouteTypes {
     | '/api/garmin/callback'
     | '/api/garmin/connect'
     | '/api/garmin/disconnect'
+    | '/api/garmin/key'
     | '/api/garmin/status'
     | '/api/garmin/tools'
     | '/api/web/read'
@@ -258,6 +270,7 @@ export interface RootRouteChildren {
   ApiGarminCallbackRoute: typeof ApiGarminCallbackRoute
   ApiGarminConnectRoute: typeof ApiGarminConnectRoute
   ApiGarminDisconnectRoute: typeof ApiGarminDisconnectRoute
+  ApiGarminKeyRoute: typeof ApiGarminKeyRoute
   ApiGarminStatusRoute: typeof ApiGarminStatusRoute
   ApiGarminToolsRoute: typeof ApiGarminToolsRoute
   ApiWebReadRoute: typeof ApiWebReadRoute
@@ -364,6 +377,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiGarminDisconnectRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/garmin/key': {
+      id: '/api/garmin/key'
+      path: '/api/garmin/key'
+      fullPath: '/api/garmin/key'
+      preLoaderRoute: typeof ApiGarminKeyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/garmin/status': {
       id: '/api/garmin/status'
       path: '/api/garmin/status'
@@ -410,6 +430,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiGarminCallbackRoute: ApiGarminCallbackRoute,
   ApiGarminConnectRoute: ApiGarminConnectRoute,
   ApiGarminDisconnectRoute: ApiGarminDisconnectRoute,
+  ApiGarminKeyRoute: ApiGarminKeyRoute,
   ApiGarminStatusRoute: ApiGarminStatusRoute,
   ApiGarminToolsRoute: ApiGarminToolsRoute,
   ApiWebReadRoute: ApiWebReadRoute,

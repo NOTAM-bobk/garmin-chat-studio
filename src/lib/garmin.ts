@@ -36,6 +36,8 @@ export type GarminStatus = {
   tools: number;
   /** Total tools the connected Garmin account exposes, when known. */
   available: number;
+  /** How the account is connected: the MCP gateway or a personal API key. */
+  mode?: "mcp" | "personal";
 };
 
 export type ToolResult = {
@@ -166,7 +168,17 @@ const LABELS: Record<string, string> = {
   schedule_workout: "Scheduling a workout",
 };
 
-const DATE_KEYS = ["cstart", "start", "startDate", "date", "calendarDate", "end", "endDate"];
+const DATE_KEYS = [
+  "cstart",
+  "start",
+  "start_date",
+  "startDate",
+  "date",
+  "calendarDate",
+  "end",
+  "end_date",
+  "endDate",
+];
 
 function shortDate(value: unknown): string | null {
   if (typeof value !== "string") return null;

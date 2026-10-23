@@ -333,6 +333,7 @@ export function statusFor(session: SessionPayload | null, available: number): Ga
     configured: isConfigured(),
     tools: GARMIN_TOOL_ALLOWLIST.length,
     available,
+    ...(session ? { mode: "mcp" as const } : {}),
   };
 }
 

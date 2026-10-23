@@ -115,6 +115,22 @@ export async function ensureGuest(puter: PuterGlobal) {
   await puter.auth.signIn({ attempt_temp_user_creation: true });
 }
 
+/**
+ * Create the temporary Puter user ahead of the first message.
+ *
+ * Account creation needs a user gesture, and the first send is busy doing other
+ * work before it reaches the model, so the session is warmed from a tap instead.
+ * Failures are ignored: the send path retries.
+ */
+export async function primeSession(): Promise<void> {
+  try {
+    const puter = await loadPuter();
+    await ensureGuest(puter);
+  } catch {
+    // The first message will try again in its own user gesture.
+  }
+}
+
 type Chunk = {
   type?: string;
   text?: unknown;

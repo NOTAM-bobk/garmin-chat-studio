@@ -18,6 +18,9 @@ export type ChartSpec = {
   unit?: string;
   x: string[];
   series: ChartSeries[];
+  /** Optional captions for the two axes, when the labels need context. */
+  xLabel?: string;
+  yLabel?: string;
   /** Optional benchmark drawn as a dashed line (goal, ceiling, baseline). */
   target?: number;
   targetLabel?: string;
@@ -104,6 +107,12 @@ export function parseChartSpec(raw: string): ChartSpec | null {
       : {}),
     ...(typeof record["unit"] === "string" && record["unit"].trim()
       ? { unit: record["unit"].trim().slice(0, 16) }
+      : {}),
+    ...(typeof record["xLabel"] === "string" && record["xLabel"].trim()
+      ? { xLabel: record["xLabel"].trim().slice(0, 24) }
+      : {}),
+    ...(typeof record["yLabel"] === "string" && record["yLabel"].trim()
+      ? { yLabel: record["yLabel"].trim().slice(0, 24) }
       : {}),
     ...(target !== undefined ? { target } : {}),
     ...(typeof record["targetLabel"] === "string" && record["targetLabel"].trim()

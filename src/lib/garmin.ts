@@ -97,6 +97,21 @@ export const GARMIN_TOOL_ALLOWLIST = [
   "schedule_workout",
 ] as const;
 
+/**
+ * Read tools are allowed by shape, not only by name.
+ *
+ * Per-session detail (splits, streams, charts, weather, gear) ships under
+ * `get_activity*`, and the gateway's exact suffixes change between releases.
+ * Matching the prefix keeps every read-only activity tool reachable without
+ * hard-coding names that may not exist yet. Writes still go through the list.
+ */
+export function isAllowedTool(name: string): boolean {
+  return (
+    GARMIN_TOOL_ALLOWLIST.includes(name as (typeof GARMIN_TOOL_ALLOWLIST)[number]) ||
+    /^get_activity[a-z_]*$/.test(name)
+  );
+}
+
 export const WRITE_TOOLS = new Set<string>([
   "create_run_workout",
   "create_run_interval_workout",
@@ -131,7 +146,13 @@ const LABELS: Record<string, string> = {
   get_weigh_ins: "Reading weigh-ins",
   get_activities_by_date: "Reading activities",
   get_activity: "Reading an activity",
+  get_activity_details: "Reading activity detail",
+  get_activity_detail: "Reading activity detail",
   get_activity_splits: "Reading activity splits",
+  get_activity_split_summaries: "Reading split summaries",
+  get_activity_hr_zones: "Reading activity heart-rate zones",
+  get_activity_power: "Reading activity power",
+  get_activity_streams: "Reading activity streams",
   get_activity_weather: "Reading activity weather",
   get_gear: "Reading your gear",
   get_workouts: "Reading workouts",

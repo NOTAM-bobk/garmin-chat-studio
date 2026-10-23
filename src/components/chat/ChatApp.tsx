@@ -116,6 +116,7 @@ import {
   listPuterModels,
   loadPuter,
   nameChat,
+  primeSession,
   runRound,
   suggestFollowups,
   type AgentMessage,
@@ -257,6 +258,13 @@ Answer shape — read the question first, then pick the structure it needs; do n
 - If the previous turns already established something, build on it instead of restating it.
 - When the user seems to be asking about a limitation of their device or data, say what is measurable and what is not.
 
+Deep dives on activities:
+- Every activity tool starting with get_activity reads one session: the list/summary tools give headlines, the siblings give splits, streams, weather and gear. Use them together.
+- Before you characterise a session, fetch its own detail plus its splits, and its weather when conditions explain the result. One summary lookup is not a deep dive.
+- Read inside the session, not just the totals: pace or power drift between the first and second half, heart-rate drift at constant effort, cadence, elevation, zone time, and the split where the fade started. Name the point it turned.
+- Compare the session with the user's own 7- and 30-day baseline for the same sport, then say whether it was normal, better or worse and by how much.
+- If a deeper tool is missing or errors, say which layer you could not read instead of implying the session was ordinary.
+
 Web research:
 - web_search and web_read reach the open internet for what your Garmin tools cannot answer: training science, gear specs, race rules, weather, event details, current guidance.
 - Use Garmin tools for the user's own numbers and the web for what is true outside their account. A web claim never replaces a reading you could have looked up.
@@ -269,11 +277,12 @@ Charts:
 - Draw a chart whenever the reply compares three or more days, two or more sessions, or a distribution across zones or activity types. Keep the prose around it to two sentences; do not repeat charted values in a table.
 - A chart block is a fenced code block tagged ${FENCE}chart containing one line of valid JSON:
 ${FENCE}chart
-{"type":"line","title":"Sleep score","unit":"score","x":["Oct 12","Oct 13"],"series":[{"name":"Score","data":[72,80]}],"target":80,"targetLabel":"Goal 80"}
+{"type":"line","title":"Sleep score","unit":"score","x":["Oct 12","Oct 13"],"series":[{"name":"Score","data":[72,80]}],"target":80,"targetLabel":"Goal 80","xLabel":"Night","yLabel":"Score"}
 ${FENCE}
 - "type" is line (trend over time), bar (day-by-day comparison), area (accumulated volume or load) or pie (share of a total, exactly one series).
 - "x" holds 3-31 short labels; each series needs the same number of plain numbers; up to 3 series. Optional "unit" is a short label.
 - Add "target" (a number) and a short "targetLabel" whenever there is a real benchmark — a goal, a zone ceiling, a baseline average, a race pace. It draws a dashed line, so the gap is visible.
+- Add "xLabel" and "yLabel" whenever the numbers alone would be ambiguous ("Night", "Week", "Load", "Sleep score"). They caption the two axes; the reader can also hover or tap for the exact values.
 - Add "axis":"right" to a series only when it is on a different scale from the rest (hours against load, pace against heart rate) and both still matter. At most two scales per chart.
 - Use line for shape over time, bar when the size of each day matters, area only for volume that accumulates, pie only for parts of one total.
 - Use short x labels like "Oct 12" or "Tue", and name series by what they measure ("Pace", "Sleep score").
@@ -433,6 +442,24 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
   useEffect(() => {
     if (hydrated) saveChats(chats);
   }, [chats, hydrated]);
+
+  // Warm the temporary Puter session on the first tap or keypress, so the first
+  // message never has to create the account mid-turn (which used to stop it).
+  useEffect(() => {
+    let done = false;
+    const prime = () => {
+      if (done) return;
+      done = true;
+      void primeSession();
+    };
+    const options = { once: true, passive: true } as const;
+    window.addEventListener("pointerdown", prime, options);
+    window.addEventListener("keydown", prime, options);
+    return () => {
+      window.removeEventListener("pointerdown", prime);
+      window.removeEventListener("keydown", prime);
+    };
+  }, []);
 
   // Puter.js keeps conversations only if the app asks it to: read the account
   // and pull the cloud copy down when a real (non-temporary) user is signed in.
@@ -1063,6 +1090,44 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         }
       }
 
+      // A turn that produced no words is not finished business: a provider can
+      // close a stream after reasoning alone, or the tool budget can run out.
+      // Give the model one last pass with tools removed so it has to answer
+      // from the data it already has, instead of stopping on the trace.
+      if (!controller.signal.aborted && !streamed.trim()) {
+        const answerId = `answer-${assistantId}`;
+        const startedAt = performance.now();
+        addStep({
+          id: answerId,
+          kind: "thinking",
+          label: "Writing the answer",
+          status: "active",
+        });
+        try {
+          const final = await runRound(
+            [
+              ...history,
+              {
+                role: "user",
+                content:
+                  "Answer my last question now, in plain text, using what you already retrieved. Do not call tools.",
+              },
+            ],
+            {
+              model,
+              signal: controller.signal,
+              onEvent: (event) => {
+                if (event.type === "text") appendText(event.text);
+              },
+            },
+          );
+          if (!streamed.trim() && final.text.trim()) appendText(final.text);
+          patchStep(answerId, { status: "done", ms: performance.now() - startedAt });
+        } catch {
+          patchStep(answerId, { status: "error", ms: performance.now() - startedAt });
+        }
+      }
+
       if (controller.signal.aborted) {
         patchMessage((message) => ({
           ...message,
@@ -1075,14 +1140,17 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         }));
       } else {
         patchMessage((message) => {
-          if (message.content.trim()) return message;
+          // Every step must end: a step left active keeps the trace shimmering
+          // after the turn is over.
+          const steps = message.steps.map((step) =>
+            step.status === "active" ? { ...step, status: "done" as const } : step,
+          );
+          if (message.content.trim()) return { ...message, steps };
           return {
             ...message,
             content:
-              "I looked at your Garmin data but couldn't settle on an answer. Try asking a narrower question — for example a specific date range.",
-            steps: message.steps.map((step) =>
-              step.status === "active" ? { ...step, status: "done" } : step,
-            ),
+              "That turn ended before I had an answer. Ask again, or narrow it down — for example a specific date range or one metric.",
+            steps,
           };
         });
       }

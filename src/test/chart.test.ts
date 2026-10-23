@@ -45,6 +45,17 @@ describe("parseChartSpec", () => {
     );
   });
 
+  it("keeps optional axis captions", () => {
+    const spec = parseChartSpec(
+      JSON.stringify({ type: "line", x, data: [1, 2, 3], xLabel: "Night", yLabel: "Score" }),
+    );
+    expect(spec?.xLabel).toBe("Night");
+    expect(spec?.yLabel).toBe("Score");
+    expect(parseChartSpec(JSON.stringify({ type: "line", x, data: [1, 2, 3] }))?.xLabel).toBe(
+      undefined,
+    );
+  });
+
   it("moves only explicitly right-axis series onto the second scale", () => {
     const spec = parseChartSpec(
       JSON.stringify({

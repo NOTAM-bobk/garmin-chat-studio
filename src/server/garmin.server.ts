@@ -10,6 +10,7 @@ import process from "node:process";
 
 import {
   GARMIN_TOOL_ALLOWLIST,
+  isAllowedTool,
   type GarminStatus,
   type GarminTool,
   type JsonSchema,
@@ -558,9 +559,18 @@ export async function fetchTools(
   }
 
   const byName = new Map(collected.map((tool) => [tool.name, tool]));
-  const tools = GARMIN_TOOL_ALLOWLIST.map((name) => byName.get(name)).filter(
-    (tool): tool is GarminTool => !!tool,
-  );
+  const tools = collected
+    .filter((tool) => isAllowedTool(tool.name))
+    .sort((a, b) => {
+      // Keep the curated order first, then the extra read-only activity tools.
+      const curated = GARMIN_TOOL_ALLOWLIST as readonly string[];
+      const left = curated.indexOf(a.name);
+      const right = curated.indexOf(b.name);
+      if (left === -1 && right === -1) return a.name.localeCompare(b.name);
+      if (left === -1) return 1;
+      if (right === -1) return -1;
+      return left - right;
+    });
   return { tools, available: Math.max(available, collected.length) };
 }
 
@@ -587,7 +597,7 @@ export async function callTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
-  if (!GARMIN_TOOL_ALLOWLIST.includes(name as (typeof GARMIN_TOOL_ALLOWLIST)[number])) {
+  if (!isAllowedTool(name)) {
     throw new Error(`Tool "${name}" is not available in Garmin Chat Studio.`);
   }
   let sessionId = await initialize(token);

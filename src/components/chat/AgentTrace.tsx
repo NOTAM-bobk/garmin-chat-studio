@@ -24,19 +24,20 @@ export function AgentTrace({ steps, running }: { steps: TraceStep[]; running: bo
   const [showReasoning, setShowReasoning] = useState(false);
   if (steps.length === 0) return null;
 
-  const active = running || steps.some((step) => step.status === "active");
   const total = steps.reduce((sum, step) => sum + (step.ms ?? 0), 0);
-  const reasoning = steps
-    .filter((step) => step.kind === "thinking")
-    .map((step) => (step.text ?? "").trim())
-    .filter(Boolean)
-    .join("\n\n");
-
+  // Only a turn that is still going may say it is thinking. A step left marked
+  // active after the turn ends would otherwise shimmer forever.
+  const active = running && steps.some((step) => step.status === "active");
   const heading = active
     ? "Thinking…"
     : total >= 500
       ? `Thought for ${duration(total)}`
       : "Thought process";
+  const reasoning = steps
+    .filter((step) => step.kind === "thinking")
+    .map((step) => (step.text ?? "").trim())
+    .filter(Boolean)
+    .join("\n\n");
 
   return (
     <div className="mb-4">
@@ -53,9 +54,10 @@ export function AgentTrace({ steps, running }: { steps: TraceStep[]; running: bo
       <ul className="mt-3 space-y-2.5">
         {steps.map((step) => {
           const meta = rowMeta(step);
+          const stepActive = step.status === "active" && running;
           return (
             <li key={step.id} className="flex items-start gap-2.5 text-[14.5px] leading-snug">
-              {step.status === "active" ? (
+              {stepActive ? (
                 <span className="mt-0.5 grid size-4 shrink-0 place-items-center">
                   <span className="size-2 animate-pulse rounded-full bg-foreground shadow-[0_0_0_3px_oklch(0.2_0_0/10%)]" />
                 </span>
@@ -71,7 +73,7 @@ export function AgentTrace({ steps, running }: { steps: TraceStep[]; running: bo
               <span
                 className={cn(
                   "min-w-0 flex-1",
-                  step.status === "active" ? "text-foreground" : "text-foreground/85",
+                  stepActive ? "text-foreground" : "text-foreground/85",
                   step.status === "error" && "text-destructive",
                 )}
               >

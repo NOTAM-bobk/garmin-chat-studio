@@ -42,6 +42,16 @@ describe("AgentTrace", () => {
     expect(screen.getByText("Sleep was shorter on the hard days.")).toBeInTheDocument();
   });
 
+  it("stops saying Thinking… once the turn is over, even if a step was left open", () => {
+    const leftover: TraceStep[] = [
+      { id: "s1", kind: "thinking", label: "Reading your question", status: "active" },
+    ];
+    render(<AgentTrace steps={leftover} running={false} />);
+
+    expect(screen.queryByText("Thinking…")).not.toBeInTheDocument();
+    expect(screen.getByText("Thought process")).toBeInTheDocument();
+  });
+
   it("marks the active step while running", () => {
     const running: TraceStep[] = [
       { id: "s1", kind: "thinking", label: "Reading your question", status: "done", ms: 400 },

@@ -75,6 +75,7 @@ import {
   type Message,
   type TraceStep,
 } from "@/lib/chat";
+import { chatBaseDomain, chatPath, chatSlugFromHost, chatUrlFor } from "@/lib/chat-url";
 import {
   CURATED_MODELS,
   DEFAULT_TONE,
@@ -102,6 +103,7 @@ import {
   type Memory,
 } from "@/lib/memory";
 import { haptic, readHapticsSetting, writeHapticsSetting } from "@/lib/haptics";
+import { describeWebTool, isCitationLabel, isWebTool, requestWebTool, webTools } from "@/lib/web";
 import { cn } from "@/lib/utils";
 import {
   listPuterModels,
@@ -193,7 +195,7 @@ const PRESETS = [
 const PRESET_COUNT = 4;
 const PRESET_KEY = "garmin-chat:preset-offset";
 
-const MAX_TOOL_ROUNDS = 5;
+const MAX_TOOL_ROUNDS = 6;
 
 function systemPrompt(
   status: GarminStatus | null,
@@ -239,6 +241,14 @@ Adapt to the turn:
 - Answer in the user's language, and keep their units (km or mi, 12h or 24h, kg or lb).
 - If the previous turns already established something, build on it instead of restating it.
 - When the user seems to be asking about a limitation of their device or data, say what is measurable and what is not.
+
+Web research:
+- web_search and web_read reach the open internet for what your Garmin tools cannot answer: training science, gear specs, race rules, weather, event details, current guidance.
+- Use Garmin tools for the user's own numbers and the web for what is true outside their account. A web claim never replaces a reading you could have looked up.
+- Search in natural language, skim the excerpts, then read the one or two pages that actually carry the evidence. Do not describe a page you have not opened.
+- Cite inline, right after the sentence the source supports, with the bare domain as the link text: [react.dev](https://react.dev/learn). Two to four sources per answer is plenty, and never invent a URL or a publication date.
+- Quote numbers, sample sizes and dates exactly, and say when a source is old, single-study, or contradicted by the user's own data.
+- If the web is unavailable or returns nothing useful, say so in one line and answer as general guidance.
 
 Charts:
 - Draw a chart whenever the reply compares three or more days, two or more sessions, or a distribution across zones or activity types. Keep the prose around it to two sentences; do not repeat charted values in a table.
@@ -298,7 +308,7 @@ function errorText(error: unknown): string {
   return "Something went wrong. Please try again.";
 }
 
-export function ChatApp() {
+export function ChatApp({ initialChatId = null }: { initialChatId?: string | null } = {}) {
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -327,6 +337,8 @@ export function ChatApp() {
   const [memories, setMemories] = useState<Memory[]>([]);
 
   const memoriesRef = useRef<Memory[]>([]);
+  /** Slug from the address bar, used for the first message in a shared chat. */
+  const pendingChatRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -375,7 +387,27 @@ export function ChatApp() {
       // Storage blocked: skip the one-time welcome rather than looping it.
     }
     loadPuter().catch(() => undefined);
+
+    // A chat address — /c/<id> or <id>.<domain> — selects that thread even when
+    // it isn't in this browser yet: the first message is saved under its id.
+    const requested = initialChatId ?? chatSlugFromHost(window.location.hostname);
+    if (requested) {
+      pendingChatRef.current = requested;
+      setActiveId(requested);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per page load
   }, []);
+
+  // Keep the address bar pointing at the open thread. On a chat subdomain the
+  // host already is the address, so it is left alone.
+  useEffect(() => {
+    if (!hydrated || typeof window === "undefined") return;
+    if (chatSlugFromHost(window.location.hostname)) return;
+    const target = activeId ? chatPath(activeId) : "/";
+    if (window.location.pathname !== target) {
+      window.history.replaceState(window.history.state, "", target);
+    }
+  }, [activeId, hydrated]);
 
   useEffect(() => {
     if (hydrated) saveChats(chats);
@@ -534,9 +566,25 @@ export function ChatApp() {
     stickRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
   }
 
+  /** Select a thread, hopping to its own subdomain when chats are served there. */
+  function focusChat(id: string | null) {
+    haptic("tap");
+    setMobileSidebar(false);
+    if (chatBaseDomain() && chatSlugFromHost(window.location.hostname)) {
+      window.location.assign(chatUrlFor(id));
+      return;
+    }
+    setActiveId(id);
+  }
+
   const newChat = useCallback(() => {
     haptic("tap");
     abortRef.current?.abort();
+    if (chatBaseDomain() && chatSlugFromHost(window.location.hostname)) {
+      window.location.assign(chatUrlFor(null));
+      return;
+    }
+    pendingChatRef.current = null;
     setActiveId(null);
     setMobileSidebar(false);
     setError(null);
@@ -828,8 +876,8 @@ export function ChatApp() {
     if (connected && garminSpecs.length === 0) {
       garminSpecs = toolSpecs(await refreshTools());
     }
-    // Memory tools are always available; Garmin ones only while connected.
-    const tools = [...memoryTools, ...garminSpecs];
+    // Memory and web tools are always available; Garmin ones only while connected.
+    const tools = [...memoryTools, ...webTools, ...garminSpecs];
 
     // Only the prompt being answered carries its image: past pixels stay in the
     // transcript but stop costing tokens on later turns.
@@ -902,7 +950,9 @@ export function ChatApp() {
             });
             const { label, detail } = isMemoryTool(event.call.name)
               ? describeMemoryTool(event.call.name, event.call.input)
-              : describeTool(event.call.name, event.call.input);
+              : isWebTool(event.call.name)
+                ? describeWebTool(event.call.name, event.call.input)
+                : describeTool(event.call.name, event.call.input);
             addStep({
               id: `tool-${event.call.id}`,
               kind: "tool",
@@ -932,7 +982,9 @@ export function ChatApp() {
             const local = isMemoryTool(call.name);
             const result = local
               ? handleMemoryTool(call.name, call.input)
-              : await requestTool(call.name, call.input);
+              : isWebTool(call.name)
+                ? await requestWebTool(call.name, call.input)
+                : await requestTool(call.name, call.input);
             history.push({ role: "tool", tool_call_id: call.id, content: result.text });
             patchStep(stepId, {
               status: result.ok ? "done" : "error",
@@ -1067,7 +1119,8 @@ export function ChatApp() {
     };
 
     const prior = [...(activeChat?.messages ?? []), userMessage];
-    const chatId = activeChat?.id ?? uid();
+    const chatId = activeChat?.id ?? pendingChatRef.current ?? uid();
+    pendingChatRef.current = chatId;
 
     if (activeChat) {
       setChats((previous) =>
@@ -1259,16 +1312,17 @@ export function ChatApp() {
         onSignOut={() => void stopCloudSync()}
       />
 
-      <ShareDialog open={shareOpen} onOpenChange={setShareOpen} />
+      <ShareDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        {...(activeId ? { url: chatUrlFor(activeId) } : {})}
+      />
 
       <SearchDialog
         open={searchOpen}
         onOpenChange={setSearchOpen}
         chats={chats}
-        onSelect={(id) => {
-          haptic("tap");
-          setActiveId(id);
-        }}
+        onSelect={(id) => focusChat(id)}
       />
 
       <RenameDialog
@@ -1361,11 +1415,7 @@ export function ChatApp() {
                   )}
                 >
                   <button
-                    onClick={() => {
-                      haptic("tap");
-                      setActiveId(chat.id);
-                      setMobileSidebar(false);
-                    }}
+                    onClick={() => focusChat(chat.id)}
                     className="min-w-0 flex-1 truncate px-3 py-2 text-left text-[13.5px]"
                   >
                     {chat.title || "New chat"}
@@ -1702,6 +1752,32 @@ export function ChatApp() {
 }
 
 const markdownComponents: Components = {
+  a({ href, children }) {
+    const text =
+      typeof children === "string"
+        ? children
+        : Array.isArray(children)
+          ? children.filter((part): part is string => typeof part === "string").join("")
+          : "";
+    if (typeof href === "string" && /^https?:\/\//i.test(href) && isCitationLabel(text)) {
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer noopener"
+          title={href}
+          className="citation-chip"
+        >
+          {text.trim()}
+        </a>
+      );
+    }
+    return (
+      <a href={href} target="_blank" rel="noreferrer noopener">
+        {children}
+      </a>
+    );
+  },
   pre({ children }) {
     const first = Array.isArray(children) ? children[0] : children;
     const className = (first as { props?: { className?: unknown } } | null)?.props?.className;

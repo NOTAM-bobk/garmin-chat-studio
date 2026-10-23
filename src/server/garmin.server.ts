@@ -130,17 +130,50 @@ export function readCookie(request: Request, name: string): string | undefined {
   return undefined;
 }
 
-type CookieOptions = { maxAge?: number; secure: boolean };
+type CookieOptions = { maxAge?: number; secure: boolean; domain?: string };
 
 export function bakeCookie(name: string, value: string, options: CookieOptions): string {
   const bits = [`${name}=${encodeURIComponent(value)}`, "Path=/", "HttpOnly", "SameSite=Lax"];
   if (options.maxAge !== undefined) bits.push(`Max-Age=${options.maxAge}`);
+  if (options.domain) bits.push(`Domain=${options.domain}`);
   if (options.secure) bits.push("Secure");
   return bits.join("; ");
 }
 
-export function clearCookie(name: string): string {
-  return `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+export function clearCookie(name: string, domain?: string): string {
+  const scope = domain ? `; Domain=${domain}` : "";
+  return `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${scope}`;
+}
+
+/** The base domain chats are served under, shared by client and server. */
+export function configuredChatDomain(): string {
+  const baked = import.meta.env["VITE_CHAT_DOMAIN"] as string | undefined;
+  const fromEnv = process.env["CHAT_DOMAIN"] ?? process.env["VITE_CHAT_DOMAIN"] ?? baked ?? "";
+  return fromEnv
+    .trim()
+    .toLowerCase()
+    .replace(/^\.+|\.+$/g, "");
+}
+
+/**
+ * Share one Garmin session across a chat's subdomain and the apex.
+ *
+ * Cookies are host-bound by default, so a chat at <id>.example.com would ask
+ * for a fresh Garmin sign-in. Scoping to the configured base domain fixes that;
+ * without one (apex host, localhost, preview URLs) the cookie stays host-only,
+ * so a random preview host can never set a cookie for a shared parent domain.
+ */
+export function cookieDomain(request: Request): string | undefined {
+  const base = configuredChatDomain();
+  if (!base) return undefined;
+
+  const peeled = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  const host = (peeled ?? new URL(request.url).host).split(",")[0]?.trim().toLowerCase() ?? "";
+  const hostname = host.split(":")[0] ?? "";
+  if (!hostname || hostname === "localhost" || hostname.includes(":")) return undefined;
+  if (/^\d+(\.\d+){3}$/.test(hostname)) return undefined;
+  if (hostname !== base && !hostname.endsWith(`.${base}`)) return undefined;
+  return base;
 }
 
 export function requestOrigin(request: Request): string {
@@ -287,7 +320,9 @@ export async function exchangeCode(options: {
 export async function readSession(request: Request): Promise<SessionPayload | null> {
   const payload = await unseal<SessionPayload>(readCookie(request, SESSION_COOKIE));
   if (!payload?.accessToken) return null;
-  if (payload.expiresAt && payload.expiresAt < Date.now()) return null;
+  // The stored expiry is a hint, not a gate: the gateway is the authority, and
+  // rejecting early is what forced a fresh sign-in every hour. A real 401 from
+  // the gateway clears the cookie instead.
   return payload;
 }
 

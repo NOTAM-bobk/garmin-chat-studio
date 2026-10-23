@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
   SESSION_COOKIE,
   clearCookie,
+  cookieDomain,
   getTools,
   jsonResponse,
   readSession,
@@ -25,7 +26,7 @@ export const Route = createFileRoute("/api/garmin/tools")({
           return jsonResponse(
             { error: message },
             expired ? 401 : 502,
-            expired ? [clearCookie(SESSION_COOKIE)] : [],
+            expired ? [clearCookie(SESSION_COOKIE, cookieDomain(request))] : [],
           );
         }
       },

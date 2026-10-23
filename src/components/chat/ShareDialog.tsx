@@ -10,17 +10,20 @@ const SHARE_TEXT = "Garmin Chat — ask your own Garmin data anything";
 export function ShareDialog({
   open,
   onOpenChange,
+  url,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Address of the open chat; falls back to the app root. */
+  url?: string;
 }) {
-  const [url, setUrl] = useState("");
+  const [link, setLink] = useState("");
   const [copied, setCopied] = useState(false);
   const canNativeShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
 
   useEffect(() => {
-    if (open) setUrl(window.location.origin);
-  }, [open]);
+    if (open) setLink(url ?? window.location.origin);
+  }, [open, url]);
 
   useEffect(() => {
     if (!open) setCopied(false);
@@ -28,7 +31,7 @@ export function ShareDialog({
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(link);
       haptic("done");
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
@@ -41,13 +44,13 @@ export function ShareDialog({
 
   async function nativeShare() {
     try {
-      await navigator.share({ title: "Garmin Chat", text: SHARE_TEXT, url });
+      await navigator.share({ title: "Garmin Chat", text: SHARE_TEXT, url: link });
     } catch {
       // Dismissing the share sheet is not an error.
     }
   }
 
-  const encoded = encodeURIComponent(`${SHARE_TEXT} ${url}`);
+  const encoded = encodeURIComponent(`${SHARE_TEXT} ${link}`);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -63,7 +66,8 @@ export function ShareDialog({
             id="share-description"
             className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground"
           >
-            Send the link to a training partner. Nothing about your account is included.
+            This chat has its own address. Anyone who opens it gets the app — your Garmin data never
+            travels with the link.
           </DialogDescription>
         </div>
 
@@ -72,7 +76,7 @@ export function ShareDialog({
             <Link2 className="size-4 shrink-0 text-muted-foreground" />
             <input
               readOnly
-              value={url}
+              value={link}
               aria-label="Share link"
               onFocus={(event) => event.currentTarget.select()}
               className="min-w-0 flex-1 bg-transparent font-mono text-[12px] text-muted-foreground focus:outline-none"

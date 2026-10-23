@@ -16,12 +16,15 @@ import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as UpgradeRouteImport } from './routes/upgrade'
 import { Route as BlogIndexRouteImport } from './routes/blog/index'
 import { Route as BlogSlugRouteImport } from './routes/blog/$slug'
+import { Route as CChatIdRouteImport } from './routes/c.$chatId'
 import { Route as ApiGarminCallRouteImport } from './routes/api/garmin/call'
 import { Route as ApiGarminCallbackRouteImport } from './routes/api/garmin/callback'
 import { Route as ApiGarminConnectRouteImport } from './routes/api/garmin/connect'
 import { Route as ApiGarminDisconnectRouteImport } from './routes/api/garmin/disconnect'
 import { Route as ApiGarminStatusRouteImport } from './routes/api/garmin/status'
 import { Route as ApiGarminToolsRouteImport } from './routes/api/garmin/tools'
+import { Route as ApiWebReadRouteImport } from './routes/api/web/read'
+import { Route as ApiWebSearchRouteImport } from './routes/api/web/search'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -58,6 +61,11 @@ const BlogSlugRoute = BlogSlugRouteImport.update({
   path: '/blog/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CChatIdRoute = CChatIdRouteImport.update({
+  id: '/c/$chatId',
+  path: '/c/$chatId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiGarminCallRoute = ApiGarminCallRouteImport.update({
   id: '/api/garmin/call',
   path: '/api/garmin/call',
@@ -88,6 +96,16 @@ const ApiGarminToolsRoute = ApiGarminToolsRouteImport.update({
   path: '/api/garmin/tools',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiWebReadRoute = ApiWebReadRouteImport.update({
+  id: '/api/web/read',
+  path: '/api/web/read',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiWebSearchRoute = ApiWebSearchRouteImport.update({
+  id: '/api/web/search',
+  path: '/api/web/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -96,6 +114,7 @@ export interface FileRoutesByFullPath {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/upgrade': typeof UpgradeRoute
   '/blog/$slug': typeof BlogSlugRoute
+  '/c/$chatId': typeof CChatIdRoute
   '/blog/': typeof BlogIndexRoute
   '/api/garmin/call': typeof ApiGarminCallRoute
   '/api/garmin/callback': typeof ApiGarminCallbackRoute
@@ -103,6 +122,8 @@ export interface FileRoutesByFullPath {
   '/api/garmin/disconnect': typeof ApiGarminDisconnectRoute
   '/api/garmin/status': typeof ApiGarminStatusRoute
   '/api/garmin/tools': typeof ApiGarminToolsRoute
+  '/api/web/read': typeof ApiWebReadRoute
+  '/api/web/search': typeof ApiWebSearchRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -111,6 +132,7 @@ export interface FileRoutesByTo {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/upgrade': typeof UpgradeRoute
   '/blog/$slug': typeof BlogSlugRoute
+  '/c/$chatId': typeof CChatIdRoute
   '/blog': typeof BlogIndexRoute
   '/api/garmin/call': typeof ApiGarminCallRoute
   '/api/garmin/callback': typeof ApiGarminCallbackRoute
@@ -118,6 +140,8 @@ export interface FileRoutesByTo {
   '/api/garmin/disconnect': typeof ApiGarminDisconnectRoute
   '/api/garmin/status': typeof ApiGarminStatusRoute
   '/api/garmin/tools': typeof ApiGarminToolsRoute
+  '/api/web/read': typeof ApiWebReadRoute
+  '/api/web/search': typeof ApiWebSearchRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -127,6 +151,7 @@ export interface FileRoutesById {
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/upgrade': typeof UpgradeRoute
   '/blog/$slug': typeof BlogSlugRoute
+  '/c/$chatId': typeof CChatIdRoute
   '/blog/': typeof BlogIndexRoute
   '/api/garmin/call': typeof ApiGarminCallRoute
   '/api/garmin/callback': typeof ApiGarminCallbackRoute
@@ -134,6 +159,8 @@ export interface FileRoutesById {
   '/api/garmin/disconnect': typeof ApiGarminDisconnectRoute
   '/api/garmin/status': typeof ApiGarminStatusRoute
   '/api/garmin/tools': typeof ApiGarminToolsRoute
+  '/api/web/read': typeof ApiWebReadRoute
+  '/api/web/search': typeof ApiWebSearchRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -144,6 +171,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/upgrade'
     | '/blog/$slug'
+    | '/c/$chatId'
     | '/blog/'
     | '/api/garmin/call'
     | '/api/garmin/callback'
@@ -151,6 +179,8 @@ export interface FileRouteTypes {
     | '/api/garmin/disconnect'
     | '/api/garmin/status'
     | '/api/garmin/tools'
+    | '/api/web/read'
+    | '/api/web/search'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -159,6 +189,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/upgrade'
     | '/blog/$slug'
+    | '/c/$chatId'
     | '/blog'
     | '/api/garmin/call'
     | '/api/garmin/callback'
@@ -166,6 +197,8 @@ export interface FileRouteTypes {
     | '/api/garmin/disconnect'
     | '/api/garmin/status'
     | '/api/garmin/tools'
+    | '/api/web/read'
+    | '/api/web/search'
   id:
     | '__root__'
     | '/'
@@ -174,6 +207,7 @@ export interface FileRouteTypes {
     | '/sitemap.xml'
     | '/upgrade'
     | '/blog/$slug'
+    | '/c/$chatId'
     | '/blog/'
     | '/api/garmin/call'
     | '/api/garmin/callback'
@@ -181,6 +215,8 @@ export interface FileRouteTypes {
     | '/api/garmin/disconnect'
     | '/api/garmin/status'
     | '/api/garmin/tools'
+    | '/api/web/read'
+    | '/api/web/search'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -190,6 +226,7 @@ export interface RootRouteChildren {
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   UpgradeRoute: typeof UpgradeRoute
   BlogSlugRoute: typeof BlogSlugRoute
+  CChatIdRoute: typeof CChatIdRoute
   BlogIndexRoute: typeof BlogIndexRoute
   ApiGarminCallRoute: typeof ApiGarminCallRoute
   ApiGarminCallbackRoute: typeof ApiGarminCallbackRoute
@@ -197,6 +234,8 @@ export interface RootRouteChildren {
   ApiGarminDisconnectRoute: typeof ApiGarminDisconnectRoute
   ApiGarminStatusRoute: typeof ApiGarminStatusRoute
   ApiGarminToolsRoute: typeof ApiGarminToolsRoute
+  ApiWebReadRoute: typeof ApiWebReadRoute
+  ApiWebSearchRoute: typeof ApiWebSearchRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -250,6 +289,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BlogSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/c/$chatId': {
+      id: '/c/$chatId'
+      path: '/c/$chatId'
+      fullPath: '/c/$chatId'
+      preLoaderRoute: typeof CChatIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/garmin/call': {
       id: '/api/garmin/call'
       path: '/api/garmin/call'
@@ -292,6 +338,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiGarminToolsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/web/read': {
+      id: '/api/web/read'
+      path: '/api/web/read'
+      fullPath: '/api/web/read'
+      preLoaderRoute: typeof ApiWebReadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/web/search': {
+      id: '/api/web/search'
+      path: '/api/web/search'
+      fullPath: '/api/web/search'
+      preLoaderRoute: typeof ApiWebSearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -302,6 +362,7 @@ const rootRouteChildren: RootRouteChildren = {
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   UpgradeRoute: UpgradeRoute,
   BlogSlugRoute: BlogSlugRoute,
+  CChatIdRoute: CChatIdRoute,
   BlogIndexRoute: BlogIndexRoute,
   ApiGarminCallRoute: ApiGarminCallRoute,
   ApiGarminCallbackRoute: ApiGarminCallbackRoute,
@@ -309,6 +370,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiGarminDisconnectRoute: ApiGarminDisconnectRoute,
   ApiGarminStatusRoute: ApiGarminStatusRoute,
   ApiGarminToolsRoute: ApiGarminToolsRoute,
+  ApiWebReadRoute: ApiWebReadRoute,
+  ApiWebSearchRoute: ApiWebSearchRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

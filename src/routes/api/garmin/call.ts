@@ -4,6 +4,7 @@ import {
   SESSION_COOKIE,
   callTool,
   clearCookie,
+  cookieDomain,
   jsonResponse,
   readSession,
 } from "@/server/garmin.server";
@@ -43,7 +44,7 @@ export const Route = createFileRoute("/api/garmin/call")({
           return jsonResponse(
             { error: message, expired },
             expired ? 401 : 502,
-            expired ? [clearCookie(SESSION_COOKIE)] : [],
+            expired ? [clearCookie(SESSION_COOKIE, cookieDomain(request))] : [],
           );
         }
       },

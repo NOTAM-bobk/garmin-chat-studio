@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { ChatApp } from "@/components/chat/ChatApp";
@@ -22,6 +22,19 @@ describe("empty-state presets", () => {
     expect(await screen.findByRole("button", { name: "HRV trend" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Long run check" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Sleep debrief" })).not.toBeInTheDocument();
+  });
+
+  it("opens search and uses the panel icon and glow connect button", async () => {
+    render(<ChatApp />);
+
+    expect(await screen.findByRole("button", { name: "Search" })).toBeInTheDocument();
+    expect(document.querySelector(".lucide-panel-left")).toBeTruthy();
+
+    const connect = screen.getAllByRole("button", { name: /Connect Garmin/ });
+    expect(connect.some((button) => button.className.includes("bg-[#0d0d0f]"))).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(await screen.findByLabelText("Search query")).toBeInTheDocument();
   });
 
   it("links to the upgrade screen and credits the builder", async () => {

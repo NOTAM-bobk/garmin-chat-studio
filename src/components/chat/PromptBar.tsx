@@ -44,6 +44,8 @@ export interface PromptBarProps {
   onPickImage?: ((file: File) => void) | undefined;
   onRemoveImage?: (() => void) | undefined;
   placeholder?: string;
+  /** Open menus upward — the composer sits at the bottom of a conversation. */
+  dropUp?: boolean;
   onNewChat?: () => void;
   onOpenSettings?: () => void;
   onConnect?: () => void;
@@ -111,6 +113,7 @@ export default function PromptBar({
   onPickImage,
   onRemoveImage,
   placeholder = "Ask about your training",
+  dropUp = false,
   onNewChat,
   onOpenSettings,
   onConnect,
@@ -305,7 +308,7 @@ export default function PromptBar({
                 <Plus size={20} />
               </BarButton>
               {openPanel === "add" && (
-                <Menu>
+                <Menu side={dropUp ? "up" : "down"}>
                   <MenuItem
                     icon={ImagePlus}
                     label="Upload image"
@@ -379,7 +382,7 @@ export default function PromptBar({
                 <ChevronDown size={15} />
               </button>
               {openPanel === "tone" && (
-                <Menu align="right" role="listbox" minWidth={170}>
+                <Menu align="right" side={dropUp ? "up" : "down"} role="listbox" minWidth={170}>
                   {TONES.map((option) => {
                     const Icon = toneIcons[option.id];
                     return (
@@ -472,11 +475,13 @@ function BarButton({
 
 function Menu({
   align = "left",
+  side = "down",
   minWidth = 190,
   role,
   children,
 }: {
   align?: "left" | "right";
+  side?: "up" | "down";
   minWidth?: number;
   role?: string;
   children: ReactNode;
@@ -484,9 +489,11 @@ function Menu({
   return (
     <div
       role={role}
+      data-side={side}
       style={{ minWidth }}
       className={cn(
-        "absolute top-11 z-20 rounded-2xl bg-popover p-1.5 shadow-lg ring-1 ring-border",
+        "absolute z-20 rounded-2xl bg-popover p-1.5 shadow-lg ring-1 ring-border",
+        side === "up" ? "bottom-11" : "top-11",
         align === "right" ? "right-0" : "left-0",
       )}
     >

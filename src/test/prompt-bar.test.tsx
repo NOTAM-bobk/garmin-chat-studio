@@ -67,6 +67,26 @@ describe("PromptBar", () => {
     expect(onSubmit).toHaveBeenCalledWith("How is my load?");
   });
 
+  it("drops menus upward when the composer sits at the bottom", () => {
+    render(
+      <PromptBar
+        value=""
+        onChange={() => undefined}
+        onSubmit={() => undefined}
+        onStop={() => undefined}
+        busy={false}
+        tone="coach"
+        onToneChange={() => undefined}
+        dropUp
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Add"));
+    expect(
+      screen.getByRole("option", { name: "Upload image" }).closest("[data-side]"),
+    ).toHaveAttribute("data-side", "up");
+  });
+
   it("handles an image from the plus menu", () => {
     const onPickImage = vi.fn();
     const onRemoveImage = vi.fn();

@@ -19,10 +19,12 @@ import {
   Loader2,
   Moon,
   MoreHorizontal,
+  PanelLeft,
   PenLine,
   Plug,
   RotateCcw,
   Route,
+  Search,
   Settings2,
   Share2,
   Sparkles,
@@ -42,8 +44,10 @@ import { ChatChart } from "@/components/chat/ChatChart";
 import { OnboardingDialog } from "@/components/chat/OnboardingDialog";
 import PromptBar from "@/components/chat/PromptBar";
 import { RenameDialog } from "@/components/chat/RenameDialog";
+import { SearchDialog } from "@/components/chat/SearchDialog";
 import { SettingsDialog } from "@/components/chat/SettingsDialog";
 import { ShareDialog } from "@/components/chat/ShareDialog";
+import { GlowButton } from "@/components/ui/glow-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -293,6 +297,7 @@ export function ChatApp() {
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [haptics, setHaptics] = useState(true);
   const [renamingChat, setRenamingChat] = useState<Chat | null>(null);
 
@@ -1109,6 +1114,7 @@ export function ChatApp() {
       onOpenSettings={() => setSettingsOpen(true)}
       onConnect={connectGarmin}
       textareaRef={textareaRef}
+      dropUp={!!activeChat}
     />
   );
 
@@ -1157,6 +1163,16 @@ export function ChatApp() {
 
       <ShareDialog open={shareOpen} onOpenChange={setShareOpen} />
 
+      <SearchDialog
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        chats={chats}
+        onSelect={(id) => {
+          haptic("tap");
+          setActiveId(id);
+        }}
+      />
+
       <RenameDialog
         open={!!renamingChat}
         initialTitle={renamingChat?.title ?? ""}
@@ -1181,15 +1197,29 @@ export function ChatApp() {
         )}
       >
         <div className="flex items-center justify-between px-2 py-2">
-          <NavToggle
-            open
-            label="Close sidebar"
-            onClick={() => {
-              setMobileSidebar(false);
-              setSidebarOpen(false);
-            }}
-            className="hover:bg-sidebar-accent"
-          />
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                setMobileSidebar(false);
+                setSidebarOpen(false);
+              }}
+              aria-label="Close sidebar"
+              title="Close sidebar"
+              className="hidden size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground active:scale-[0.97] md:grid"
+            >
+              <PanelLeft className="size-[18px]" strokeWidth={1.9} />
+            </button>
+            <NavToggle
+              open
+              label="Close sidebar"
+              onClick={() => {
+                setMobileSidebar(false);
+                setSidebarOpen(false);
+              }}
+              className="hover:bg-sidebar-accent md:hidden"
+            />
+          </div>
           <button
             onClick={newChat}
             aria-label="New chat"
@@ -1291,13 +1321,10 @@ export function ChatApp() {
               </button>
             </div>
           ) : (
-            <button
-              onClick={connectGarmin}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
-            >
+            <GlowButton fullWidth onClick={connectGarmin} size="sm" className="mt-0.5">
               <Plug className="size-3.5" />
               Connect Garmin
-            </button>
+            </GlowButton>
           )}
 
           <div className="mt-1 space-y-0.5 border-t border-sidebar-border/60 pt-1">
@@ -1322,6 +1349,17 @@ export function ChatApp() {
             >
               <Settings2 className="size-3.5" />
               Settings
+            </button>
+            <button
+              onClick={() => {
+                haptic("tap");
+                setSearchOpen(true);
+                setMobileSidebar(false);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+            >
+              <Search className="size-3.5" />
+              Search
             </button>
             <button
               onClick={() => setWelcomeOpen(true)}
@@ -1407,13 +1445,10 @@ export function ChatApp() {
                 Connected
               </span>
             ) : (
-              <button
-                onClick={connectGarmin}
-                className="hidden items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:inline-flex"
-              >
-                <Plug className="size-3" />
+              <GlowButton onClick={connectGarmin} size="sm" className="hidden sm:inline-flex">
+                <Plug className="size-3.5" />
                 Connect Garmin
-              </button>
+              </GlowButton>
             )}
             <button
               onClick={newChat}

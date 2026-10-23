@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import PromptBar from "@/components/chat/PromptBar";
 import type { ToneId } from "@/lib/models";
@@ -40,7 +40,22 @@ function Harness({
   );
 }
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("PromptBar", () => {
+  it("cycles the hint while the field is empty", () => {
+    vi.useFakeTimers();
+    render(<Harness onSubmit={vi.fn()} />);
+
+    expect(screen.getByText("Ask about your training")).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(4700);
+    });
+    expect(screen.getByText("Ask anything")).toBeInTheDocument();
+  });
+
   it("submits typed text with Enter", () => {
     const onSubmit = vi.fn();
     render(<Harness onSubmit={onSubmit} />);

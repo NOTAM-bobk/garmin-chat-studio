@@ -1,144 +1,106 @@
 import { useState } from "react";
-import { AlertCircle, ChevronUp, HeartPulse, Loader2, Wrench } from "lucide-react";
+import { Check, X } from "lucide-react";
 
 import type { TraceStep } from "@/lib/chat";
 import { cn } from "@/lib/utils";
 
-function formatMs(ms: number | undefined): string {
-  if (!ms || ms < 250) return "";
+function duration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function rowMeta(step: TraceStep): string {
+  const meta =
+    step.kind === "tool" ? (step.preview ?? step.detail ?? "") : step.ms ? duration(step.ms) : "";
+  return meta.length > 44 ? `${meta.slice(0, 43)}…` : meta;
+}
+
 /**
- * The model's reasoning, printed as faint background text instead of a panel.
- * It streams in live and collapses to three lines once the answer lands.
+ * The thinking trace: a plain checklist of what the assistant did, in order.
+ * Checks for finished steps, a dot for the running one, and the tool result on
+ * the right. Reasoning text is available underneath once the turn is over.
  */
-export function Thinking({ steps, running }: { steps: TraceStep[]; running: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-  const text = steps
+export function AgentTrace({ steps, running }: { steps: TraceStep[]; running: boolean }) {
+  const [showReasoning, setShowReasoning] = useState(false);
+  if (steps.length === 0) return null;
+
+  const active = running || steps.some((step) => step.status === "active");
+  const total = steps.reduce((sum, step) => sum + (step.ms ?? 0), 0);
+  const reasoning = steps
     .filter((step) => step.kind === "thinking")
     .map((step) => (step.text ?? "").trim())
     .filter(Boolean)
     .join("\n\n");
 
-  if (!text) return null;
-
-  const clamped = !running && !expanded;
-
-  return (
-    <div className="mb-1.5">
-      <p
-        className={cn("thinking-layer", running && "is-live", clamped && "line-clamp-3")}
-        aria-live="polite"
-      >
-        {text}
-      </p>
-      {!running && text.length > 180 && (
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          className="mt-0.5 text-[10.5px] text-muted-foreground/70 transition-colors hover:text-muted-foreground"
-        >
-          {expanded ? "Hide reasoning" : "Show reasoning"}
-        </button>
-      )}
-    </div>
-  );
-}
-
-/**
- * The Garmin tools this answer actually touched, in the style of a file-activity
- * trace: one collapsible heading, then indented rows with a tool chip each.
- */
-export function ToolActivity({ steps, running }: { steps: TraceStep[]; running: boolean }) {
-  const [open, setOpen] = useState(true);
-  const tools = steps.filter((step) => step.kind === "tool");
-  if (tools.length === 0) return null;
-
-  const active = running || tools.some((step) => step.status === "active");
-  const failed = tools.filter((step) => step.status === "error").length;
   const heading = active
-    ? "Reading your Garmin data"
-    : failed > 0
-      ? `${tools.length} lookup${tools.length === 1 ? "" : "s"} · ${failed} failed`
-      : `${tools.length} Garmin lookup${tools.length === 1 ? "" : "s"}`;
+    ? "Thinking…"
+    : total >= 500
+      ? `Thought for ${duration(total)}`
+      : "Thought process";
 
   return (
-    <div className="mb-3">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-1.5 rounded-md py-0.5 text-left transition-colors hover:text-foreground"
+    <div className="mb-4">
+      <p
+        aria-live="polite"
+        className={cn(
+          "text-[13.5px] font-medium",
+          active ? "shimmer-text text-foreground/80" : "text-muted-foreground",
+        )}
       >
-        <Wrench className="size-3.5 shrink-0 text-muted-foreground/70" strokeWidth={1.9} />
-        <span
-          className={cn(
-            "truncate text-[13px] font-medium text-foreground/75",
-            active && "shimmer-text",
-          )}
-        >
-          {heading}
-        </span>
-        <ChevronUp
-          className={cn(
-            "ml-auto size-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-200",
-            !open && "rotate-180",
-          )}
-        />
-      </button>
+        {heading}
+      </p>
 
-      {open && (
-        <ul className="mt-1.5 ml-[6px] space-y-1.5 border-l border-border/70 pl-3.5">
-          {tools.map((step) => (
-            <li
-              key={step.id}
-              className="flex min-w-0 animate-in fade-in-0 slide-in-from-top-0.5 flex-wrap items-center gap-1.5 text-[13px] leading-relaxed text-muted-foreground duration-200"
-              title={[step.label, step.detail, step.preview].filter(Boolean).join(" · ")}
-            >
+      <ul className="mt-3 space-y-2.5">
+        {steps.map((step) => {
+          const meta = rowMeta(step);
+          return (
+            <li key={step.id} className="flex items-start gap-2.5 text-[14.5px] leading-snug">
+              {step.status === "active" ? (
+                <span className="mt-0.5 grid size-4 shrink-0 place-items-center">
+                  <span className="size-2 animate-pulse rounded-full bg-foreground shadow-[0_0_0_3px_oklch(0.2_0_0/10%)]" />
+                </span>
+              ) : step.status === "error" ? (
+                <X className="mt-0.5 size-4 shrink-0 text-destructive" strokeWidth={2.1} />
+              ) : (
+                <Check
+                  className="mt-0.5 size-4 shrink-0 text-muted-foreground/45"
+                  strokeWidth={2.1}
+                />
+              )}
+
               <span
                 className={cn(
-                  "min-w-0 truncate",
-                  step.status === "active" && "shimmer-text text-foreground/80",
+                  "min-w-0 flex-1",
+                  step.status === "active" ? "text-foreground" : "text-foreground/85",
                   step.status === "error" && "text-destructive",
                 )}
               >
                 {step.label}
               </span>
 
-              <span
-                className={cn(
-                  "inline-flex max-w-[16rem] shrink-0 items-center gap-1 rounded-md border px-1.5 py-[1px]",
-                  step.status === "error"
-                    ? "border-destructive/30 bg-destructive/5 text-destructive"
-                    : "border-border/80 bg-muted/40 text-muted-foreground/80",
-                )}
-              >
-                {step.status === "active" ? (
-                  <Loader2 className="size-2.5 shrink-0 animate-spin" strokeWidth={2.6} />
-                ) : step.status === "error" ? (
-                  <AlertCircle className="size-2.5 shrink-0" strokeWidth={2.6} />
-                ) : (
-                  <HeartPulse className="size-2.5 shrink-0 text-brand" strokeWidth={2.4} />
-                )}
-                <span className="truncate font-mono text-[10.5px]">{step.tool ?? step.label}</span>
-              </span>
-
-              {step.detail && (
-                <span className="min-w-0 truncate text-[11.5px] text-muted-foreground/60">
-                  {step.detail}
-                </span>
-              )}
-
-              {step.ms !== undefined && step.ms > 250 && (
-                <span className="ml-auto shrink-0 font-mono text-[9.5px] text-muted-foreground/45">
-                  {formatMs(step.ms)}
+              {meta && (
+                <span className="ml-auto max-w-[45%] shrink-0 truncate pt-0.5 text-right text-[12px] text-muted-foreground/50">
+                  {meta}
                 </span>
               )}
             </li>
-          ))}
-        </ul>
+          );
+        })}
+      </ul>
+
+      {reasoning && !active && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setShowReasoning((value) => !value)}
+            className="text-[11px] text-muted-foreground/70 transition-colors hover:text-muted-foreground"
+          >
+            {showReasoning ? "Hide reasoning" : "Show reasoning"}
+          </button>
+          {showReasoning && (
+            <p className="thinking-layer mt-1.5 text-[13px] leading-relaxed">{reasoning}</p>
+          )}
+        </div>
       )}
     </div>
   );

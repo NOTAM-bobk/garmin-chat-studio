@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   ArrowUp,
   ChevronDown,
@@ -50,6 +58,16 @@ const toneIcons: Record<ToneId, LucideIcon> = {
   straight: Zap,
 };
 
+/** Rotating hints under the caret: short, concrete, different shapes of ask. */
+const HINTS = [
+  "Ask anything",
+  "Ask about your training",
+  "Why is my readiness low this week?",
+  "Chart my sleep against my load",
+  "Drop a screenshot from your watch",
+  "Plan my next training block",
+];
+
 type SpeechResultList = {
   length: number;
   [index: number]: { isFinal: boolean; 0?: { transcript?: string } };
@@ -100,6 +118,8 @@ export default function PromptBar({
   className,
 }: PromptBarProps) {
   const [openPanel, setOpenPanel] = useState<PanelId>(null);
+  const [hintIndex, setHintIndex] = useState(0);
+  const [hintLeaving, setHintLeaving] = useState(false);
   const [recording, setRecording] = useState(false);
   const [canDictate, setCanDictate] = useState(false);
   const [sending, setSending] = useState(false);
@@ -111,6 +131,28 @@ export default function PromptBar({
   const fieldRef = textareaRef ?? localTextareaRef;
 
   valueRef.current = value;
+
+  const hints = useMemo(
+    () => [
+      placeholder,
+      ...HINTS.filter((hint) => hint.toLowerCase() !== placeholder.toLowerCase()),
+    ],
+    [placeholder],
+  );
+
+  // Swap hints on a timer: the current one blurs out, the next blurs in.
+  useEffect(() => {
+    if (value || image || hints.length < 2) return;
+    const leave = window.setTimeout(() => setHintLeaving(true), 4200);
+    const swap = window.setTimeout(() => {
+      setHintIndex((index) => (index + 1) % hints.length);
+      setHintLeaving(false);
+    }, 4620);
+    return () => {
+      window.clearTimeout(leave);
+      window.clearTimeout(swap);
+    };
+  }, [value, image, hintIndex, hints.length]);
 
   useEffect(() => {
     setCanDictate(!!speechConstructor());
@@ -199,21 +241,35 @@ export default function PromptBar({
       className={cn("prompt-bar-glow relative w-full rounded-[24px] bg-muted p-[2px]", className)}
     >
       <div className="rounded-[22px] bg-muted p-4 pb-3 sm:p-5 sm:pb-4">
-        <textarea
-          ref={fieldRef}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              handleSubmit();
-            }
-          }}
-          placeholder={placeholder}
-          rows={1}
-          aria-label={placeholder}
-          className="mb-6 max-h-[220px] w-full resize-none bg-transparent text-base leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none"
-        />
+        <div className="relative mb-6">
+          <textarea
+            ref={fieldRef}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                handleSubmit();
+              }
+            }}
+            rows={1}
+            aria-label={placeholder}
+            className="max-h-[220px] w-full resize-none bg-transparent text-base leading-relaxed text-foreground focus:outline-none"
+          />
+          {!value && (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-0 select-none overflow-hidden whitespace-nowrap text-base leading-relaxed text-muted-foreground"
+            >
+              <span
+                key={hintIndex}
+                className={cn("inline-block", hintLeaving ? "hint-out" : "hint-in")}
+              >
+                {hints[hintIndex]}
+              </span>
+            </span>
+          )}
+        </div>
 
         {image && (
           <div className="mb-4 flex items-center gap-3">

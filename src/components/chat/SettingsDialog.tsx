@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from "react";
-import { Check, Plug, ShieldCheck, Trash2, TriangleAlert, Unplug, Vibrate } from "lucide-react";
+import { Check, Plug, ShieldCheck, Trash2, TriangleAlert, Unplug, Vibrate, X } from "lucide-react";
 
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { hapticSupported, type HapticKind } from "@/lib/haptics";
+import type { Memory } from "@/lib/memory";
 import type { ModelOption, ToneId } from "@/lib/models";
 import { TONES } from "@/lib/models";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,8 @@ export function SettingsDialog({
   onHapticTest,
   chatCount,
   onClearChats,
+  memories,
+  onForgetMemory,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -51,6 +54,8 @@ export function SettingsDialog({
   onHapticTest: (kind: HapticKind) => void;
   chatCount: number;
   onClearChats: () => void;
+  memories: Memory[];
+  onForgetMemory: (id: string) => void;
 }) {
   const [confirmClear, setConfirmClear] = useState(false);
   const canVibrate = hapticSupported();
@@ -192,6 +197,41 @@ export function SettingsDialog({
                 <p className="mt-2 text-[11.5px] leading-relaxed text-muted-foreground">
                   One sign-in through the MissingMCP gateway. Your Garmin password is never stored.
                 </p>
+              )}
+            </div>
+          </Section>
+
+          <Section title="Memory" hint="Facts the assistant keeps about you, saved here.">
+            <div className="rounded-xl border border-border bg-card/60 p-3">
+              {memories.length === 0 ? (
+                <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+                  Nothing saved yet. Goals, injuries and preferences you mention in a chat are
+                  remembered for the next one.
+                </p>
+              ) : (
+                <>
+                  <p className="text-[13px]">
+                    {memories.length} remembered fact{memories.length === 1 ? "" : "s"}
+                  </p>
+                  <ul className="mt-1.5 divide-y divide-border/70">
+                    {memories.map((memory) => (
+                      <li
+                        key={memory.id}
+                        className="flex items-start gap-2 py-1.5 text-[12.5px] leading-snug"
+                      >
+                        <span className="min-w-0 flex-1">{memory.text}</span>
+                        <button
+                          type="button"
+                          aria-label={`Forget: ${memory.text}`}
+                          onClick={() => onForgetMemory(memory.id)}
+                          className="grid size-5 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
               )}
             </div>
           </Section>

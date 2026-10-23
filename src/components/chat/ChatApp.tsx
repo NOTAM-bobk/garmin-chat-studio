@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Thinking, ToolActivity } from "@/components/chat/AgentTrace";
+import { AgentTrace } from "@/components/chat/AgentTrace";
 import { ChatChart } from "@/components/chat/ChatChart";
 import { OnboardingDialog } from "@/components/chat/OnboardingDialog";
 import PromptBar from "@/components/chat/PromptBar";
@@ -71,6 +71,20 @@ import {
   type ToneId,
 } from "@/lib/models";
 import { prepareImage } from "@/lib/image";
+import {
+  MEMORY_LIMIT,
+  addMemory,
+  cleanMemoryText,
+  describeMemoryTool,
+  dropMemory,
+  isMemoryTool,
+  loadMemories,
+  memoryPrompt,
+  memoryTools,
+  replaceMemory,
+  saveMemories,
+  type Memory,
+} from "@/lib/memory";
 import { haptic, readHapticsSetting, writeHapticsSetting } from "@/lib/haptics";
 import { cn } from "@/lib/utils";
 import {
@@ -161,6 +175,7 @@ function systemPrompt(
   toolCount: number,
   toneId: ToneId,
   hasImage: boolean,
+  memories: Memory[],
 ): string {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
@@ -178,6 +193,8 @@ Today is ${weekday}, ${today}. ${connection}
 ${image}
 
 ${tone}
+
+${memoryPrompt(memories)}
 
 How to answer:
 - Ground every claim about the user in tool output or in the attached image. Never invent numbers, dates, activity names or workouts.
@@ -278,7 +295,9 @@ export function ChatApp() {
   const [status, setStatus] = useState<GarminStatus | null>(null);
   const [garminTools, setGarminTools] = useState<GarminTool[]>([]);
   const [toolsError, setToolsError] = useState<string | null>(null);
+  const [memories, setMemories] = useState<Memory[]>([]);
 
+  const memoriesRef = useRef<Memory[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -302,6 +321,9 @@ export function ChatApp() {
 
   useEffect(() => {
     setChats(loadChats());
+    const storedMemories = loadMemories();
+    memoriesRef.current = storedMemories;
+    setMemories(storedMemories);
     setHydrated(true);
     try {
       const saved = Number(localStorage.getItem(PRESET_KEY));
@@ -329,6 +351,11 @@ export function ChatApp() {
   useEffect(() => {
     if (hydrated) saveChats(chats);
   }, [chats, hydrated]);
+
+  useEffect(() => {
+    memoriesRef.current = memories;
+    if (hydrated) saveMemories(memories);
+  }, [memories, hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -565,6 +592,65 @@ export function ChatApp() {
     toast("Garmin disconnected", { description: "Your token cookie has been cleared." });
   }
 
+  /** Save, edit or forget a memory the model asked for. Stays in the browser. */
+  function handleMemoryTool(name: string, input: Record<string, unknown>): ToolResult {
+    const text = typeof input["text"] === "string" ? input["text"] : "";
+    const id = typeof input["id"] === "string" ? input["id"] : "";
+    const current = memoriesRef.current;
+
+    if (name === "memory_save") {
+      if (!cleanMemoryText(text)) {
+        return { ok: false, isError: true, text: "memory_save needs a non-empty text field." };
+      }
+      if (current.length >= MEMORY_LIMIT) {
+        return {
+          ok: false,
+          isError: true,
+          text: `Memory is full (${MEMORY_LIMIT} entries). Update or forget one first.`,
+        };
+      }
+      const { list, memory, duplicate } = addMemory(current, text);
+      memoriesRef.current = list;
+      setMemories(list);
+      return {
+        ok: true,
+        isError: false,
+        text: duplicate
+          ? `Already remembered as ${memory.id}: ${memory.text}`
+          : `Saved memory ${memory.id}: ${memory.text}. You now remember ${list.length} facts.`,
+      };
+    }
+
+    if (name === "memory_update") {
+      const list = replaceMemory(current, id, text);
+      if (!list) {
+        return {
+          ok: false,
+          isError: true,
+          text: `No memory with id "${id}". Current ids: ${current.map((memory) => memory.id).join(", ") || "none"}.`,
+        };
+      }
+      memoriesRef.current = list;
+      setMemories(list);
+      return { ok: true, isError: false, text: `Updated memory ${id}.` };
+    }
+
+    const list = dropMemory(current, id);
+    if (!list) {
+      return { ok: false, isError: true, text: `No memory with id "${id}".` };
+    }
+    memoriesRef.current = list;
+    setMemories(list);
+    return { ok: true, isError: false, text: `Forgot memory ${id}. ${list.length} facts remain.` };
+  }
+
+  function forgetMemory(id: string) {
+    haptic("warn");
+    const next = memoriesRef.current.filter((memory) => memory.id !== id);
+    memoriesRef.current = next;
+    setMemories(next);
+  }
+
   async function requestTool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
     const response = await fetch("/api/garmin/call", {
       method: "POST",
@@ -635,11 +721,12 @@ export function ChatApp() {
     abortRef.current = controller;
     setBusy(true);
 
-    let tools = connected ? toolSpecs(garminTools) : [];
-    if (connected && tools.length === 0) {
-      const loaded = await refreshTools();
-      tools = toolSpecs(loaded);
+    let garminSpecs = connected ? toolSpecs(garminTools) : [];
+    if (connected && garminSpecs.length === 0) {
+      garminSpecs = toolSpecs(await refreshTools());
     }
+    // Memory tools are always available; Garmin ones only while connected.
+    const tools = [...memoryTools, ...garminSpecs];
 
     // Only the prompt being answered carries its image: past pixels stay in the
     // transcript but stop costing tokens on later turns.
@@ -648,7 +735,7 @@ export function ChatApp() {
     const history: AgentMessage[] = [
       {
         role: "system",
-        content: systemPrompt(status, tools.length, tone, withImage),
+        content: systemPrompt(status, garminSpecs.length, tone, withImage, memoriesRef.current),
       },
       ...prior.map((message, index) =>
         imageAwareMessage(message, withImage && index === lastIndex),
@@ -664,7 +751,7 @@ export function ChatApp() {
         addStep({
           id: thinkingId,
           kind: "thinking",
-          label: round === 0 ? "Thinking" : "Reviewing your data",
+          label: round === 0 ? "Reading your question" : "Reviewing your data",
           status: "active",
         });
 
@@ -710,7 +797,9 @@ export function ChatApp() {
               status: "done",
               ms: performance.now() - thinkingStart,
             });
-            const { label, detail } = describeTool(event.call.name, event.call.input);
+            const { label, detail } = isMemoryTool(event.call.name)
+              ? describeMemoryTool(event.call.name, event.call.input)
+              : describeTool(event.call.name, event.call.input);
             addStep({
               id: `tool-${event.call.id}`,
               kind: "tool",
@@ -737,12 +826,19 @@ export function ChatApp() {
           const stepId = `tool-${call.id}`;
           const startedAt = performance.now();
           try {
-            const result = await requestTool(call.name, call.input);
+            const local = isMemoryTool(call.name);
+            const result = local
+              ? handleMemoryTool(call.name, call.input)
+              : await requestTool(call.name, call.input);
             history.push({ role: "tool", tool_call_id: call.id, content: result.text });
             patchStep(stepId, {
               status: result.ok ? "done" : "error",
               ms: performance.now() - startedAt,
-              preview: `${formatBytes(result.text)} · ${result.ok ? "loaded" : "tool reported an error"}`,
+              preview: local
+                ? result.ok
+                  ? "saved in this browser"
+                  : "memory not changed"
+                : `${formatBytes(result.text)} · ${result.ok ? "loaded" : "tool reported an error"}`,
             });
           } catch (caught) {
             const message = errorText(caught);
@@ -1051,6 +1147,8 @@ export function ChatApp() {
         onHapticTest={haptic}
         chatCount={chats.length}
         onClearChats={clearChats}
+        memories={memories}
+        onForgetMemory={(id) => forgetMemory(id)}
       />
 
       <RenameDialog
@@ -1626,8 +1724,7 @@ function MessageBubble({
 
   return (
     <div className="group animate-in fade-in-0 duration-300">
-      <Thinking steps={message.steps} running={running} />
-      <ToolActivity steps={message.steps} running={running} />
+      <AgentTrace steps={message.steps} running={running} />
 
       {empty && running && (
         <div className="flex items-center gap-1.5 py-1" aria-label="Thinking">

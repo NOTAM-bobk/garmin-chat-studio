@@ -203,6 +203,92 @@ export async function nameChat(
   return cleanTitle(responseText(raw));
 }
 
+/** Tidy one suggested question: single line, no bullets/numbering/quotes. */
+export function cleanFollowup(raw: string): string {
+  return raw
+    .replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "")
+    .replace(/^["'“”‘’`\s]+/, "")
+    .replace(/["'“”‘’`\s]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 90)
+    .trim();
+}
+
+/** Parse the model's reply into at most two follow-up questions. */
+export function parseFollowups(raw: string): string[] {
+  const text = raw.trim();
+  if (!text) return [];
+
+  const candidates: string[] = [];
+  const start = text.indexOf("[");
+  const end = text.lastIndexOf("]");
+  if (start !== -1 && end > start) {
+    try {
+      const parsed = JSON.parse(text.slice(start, end + 1)) as unknown;
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (typeof item === "string") candidates.push(item);
+        }
+      }
+    } catch {
+      // Fall through to the line-by-line parse below.
+    }
+  }
+  if (candidates.length === 0) {
+    candidates.push(...text.split(/\r?\n+/));
+  }
+
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const candidate of candidates) {
+    const question = cleanFollowup(candidate);
+    if (question.length < 8) continue;
+    const key = question.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(question);
+    if (result.length === 2) break;
+  }
+  return result;
+}
+
+/**
+ * Ask the model for two follow-up questions the user might tap next. Runs on
+ * the same Puter session as the chat; an empty list means "show nothing".
+ */
+export async function suggestFollowups(
+  messages: { role: string; content: string }[],
+  model: string,
+): Promise<string[]> {
+  const transcript = messages
+    .slice(-6)
+    .map((message) => `${message.role}: ${message.content.slice(0, 1200)}`)
+    .join("\n\n");
+  if (!transcript.trim()) return [];
+
+  try {
+    const puter = await loadPuter();
+    await ensureGuest(puter);
+
+    const raw = await puter.ai.chat(
+      [
+        {
+          role: "system",
+          content:
+            'You write the two follow-up questions a user would most likely ask next in a chat about their Garmin training data. Reply with a JSON array of exactly two short questions and nothing else, for example ["How does that compare with last month?", "What should I change tomorrow?"]. Ground each question in the conversation, keep it under 70 characters, and do not repeat a question already answered.',
+        },
+        { role: "user", content: transcript },
+      ],
+      { model, stream: false },
+    );
+
+    return parseFollowups(responseText(raw));
+  } catch {
+    return [];
+  }
+}
+
 /** One model round, streamed. Tool calls are collected and reported as events. */
 export async function runRound(
   messages: AgentMessage[],

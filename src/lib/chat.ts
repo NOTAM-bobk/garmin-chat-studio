@@ -21,6 +21,8 @@ export type Message = {
   content: string;
   steps: TraceStep[];
   error?: string;
+  /** Two follow-up questions the model proposed for this answer. */
+  followups?: string[];
   /** Local thumbs feedback, kept in this browser only. */
   feedback?: "up" | "down";
 };
@@ -70,6 +72,11 @@ function sanitizeMessage(raw: unknown): Message | null {
         .filter((step): step is TraceStep => !!step)
     : [];
   const error = typeof record["error"] === "string" ? record["error"] : undefined;
+  const followups = Array.isArray(record["followups"])
+    ? record["followups"]
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .slice(0, 2)
+    : [];
   const feedback =
     record["feedback"] === "up" ? "up" : record["feedback"] === "down" ? "down" : undefined;
   return {
@@ -78,6 +85,7 @@ function sanitizeMessage(raw: unknown): Message | null {
     content,
     steps,
     ...(error ? { error } : {}),
+    ...(followups.length > 0 ? { followups } : {}),
     ...(feedback ? { feedback } : {}),
   };
 }

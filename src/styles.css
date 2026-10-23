@@ -343,6 +343,44 @@
   }
 }
 
+/* Composer edge: one highlight sweeps around the border of the prompt bar. */
+@property --pb-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.prompt-bar-glow {
+  --pb-angle: 0deg;
+  --pb-accent: var(--color-brand);
+  background-image: conic-gradient(
+    from var(--pb-angle),
+    transparent 0deg,
+    transparent 286deg,
+    color-mix(in oklab, var(--pb-accent) 40%, transparent) 305deg,
+    var(--pb-accent) 323deg,
+    color-mix(in oklab, var(--pb-accent) 35%, transparent) 339deg,
+    transparent 352deg,
+    transparent 360deg
+  );
+  animation: pb-rotate 7s linear infinite;
+}
+
+@keyframes pb-rotate {
+  to {
+    --pb-angle: 360deg;
+  }
+}
+
+@keyframes pb-mic-pulse {
+  0% {
+    box-shadow: 0 0 0 0 oklch(0.575 0.214 27.5 / 45%);
+  }
+  100% {
+    box-shadow: 0 0 0 10px oklch(0.575 0.214 27.5 / 0%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

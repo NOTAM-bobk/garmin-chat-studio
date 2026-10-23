@@ -5,12 +5,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Activity,
-  ArrowUp,
   ArrowUpRight,
   Check,
   ChevronDown,
   CircleHelp,
   Copy,
+  CornerLeftUp,
   Dumbbell,
   Heart,
   Loader2,
@@ -20,8 +20,6 @@ import {
   Plug,
   RotateCcw,
   Settings2,
-  SlidersHorizontal,
-  Square,
   Sparkles,
   SquarePen,
   ThumbsDown,
@@ -36,6 +34,7 @@ import { toast } from "sonner";
 import { Thinking, ToolActivity } from "@/components/chat/AgentTrace";
 import { ChatChart } from "@/components/chat/ChatChart";
 import { OnboardingDialog } from "@/components/chat/OnboardingDialog";
+import PromptBar from "@/components/chat/PromptBar";
 import { RenameDialog } from "@/components/chat/RenameDialog";
 import { SettingsDialog } from "@/components/chat/SettingsDialog";
 import {
@@ -67,7 +66,14 @@ import {
 } from "@/lib/models";
 import { haptic, readHapticsSetting, writeHapticsSetting } from "@/lib/haptics";
 import { cn } from "@/lib/utils";
-import { listPuterModels, loadPuter, nameChat, runRound, type AgentMessage } from "@/lib/puter";
+import {
+  listPuterModels,
+  loadPuter,
+  nameChat,
+  runRound,
+  suggestFollowups,
+  type AgentMessage,
+} from "@/lib/puter";
 import { useSteadyReveal } from "@/lib/useSteadyReveal";
 
 const TONE_KEY = "garmin-chat:tone";
@@ -189,7 +195,6 @@ export function ChatApp() {
   const activeChat = chats.find((chat) => chat.id === activeId) ?? null;
   const toolsAvailable = garminTools.length || status?.tools || 0;
   const modelLabel = models.find((option) => option.id === model)?.label ?? model;
-  const toneLabel = TONES.find((option) => option.id === tone)?.label ?? tone;
 
   useEffect(() => {
     setChats(loadChats());
@@ -680,6 +685,21 @@ export function ChatApp() {
       abortRef.current = null;
     }
 
+    // Offer the next two questions from the finished answer. Best effort: an
+    // empty list simply renders nothing.
+    if (!controller.signal.aborted && streamed.trim()) {
+      const followups = await suggestFollowups(
+        [
+          ...prior.map((message) => ({ role: message.role, content: message.content })),
+          { role: "assistant", content: streamed },
+        ],
+        model,
+      );
+      if (followups.length > 0) {
+        patchMessage((message) => ({ ...message, followups }));
+      }
+    }
+
     return streamed;
   }
 
@@ -818,94 +838,35 @@ export function ChatApp() {
         .find((step) => step.status === "active")
     : undefined;
 
-  const sendButton = busy ? (
-    <button
-      type="button"
-      onClick={() => {
+  const composer = (
+    <PromptBar
+      value={input}
+      onChange={setInput}
+      onSubmit={(text) => void send(text)}
+      onStop={() => {
         haptic("tap");
         abortRef.current?.abort();
       }}
-      aria-label="Stop generating"
-      className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95"
-    >
-      <Square className="size-2.5 fill-current" />
-    </button>
-  ) : (
-    <button
-      type="submit"
-      disabled={!input.trim()}
-      aria-label="Send message"
-      className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-transform enabled:hover:opacity-90 disabled:opacity-20 active:scale-95"
-    >
-      <ArrowUp className="size-4" strokeWidth={2.5} />
-    </button>
-  );
-
-  const composer = (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        void send(input);
+      busy={busy}
+      connected={connected}
+      tools={toolsAvailable}
+      tone={tone}
+      onToneChange={(next) => {
+        haptic("select");
+        chooseTone(next);
       }}
-      className="rounded-[26px] border border-border bg-card p-2 shadow-composer transition-shadow focus-within:border-foreground/15 focus-within:shadow-composer-focus"
-    >
-      <textarea
-        ref={textareaRef}
-        rows={1}
-        value={input}
-        onChange={(event) => setInput(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            void send(input);
-          }
-        }}
-        placeholder={connected ? "Ask about your training" : "Ask anything"}
-        aria-label="Message"
-        className="max-h-[220px] w-full resize-none bg-transparent px-3 pb-1 pt-2.5 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground"
-      />
-      <div className="flex items-center gap-1 px-0.5">
-        {connected ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11.5px] text-muted-foreground">
-            <span className="size-1.5 rounded-full bg-emerald-500" />
-            Garmin live
-            <span className="text-muted-foreground/70">· {toolsAvailable} tools</span>
-          </span>
-        ) : (
-          <button
-            type="button"
-            onClick={connectGarmin}
-            className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <Plug className="size-3" />
-            Connect Garmin
-          </button>
-        )}
-
-        <label className="relative ml-auto inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-          <SlidersHorizontal className="size-3" />
-          {toneLabel}
-          <ChevronDown className="size-3" />
-          <select
-            value={tone}
-            onChange={(event) => {
-              haptic("select");
-              chooseTone(event.target.value as ToneId);
-            }}
-            aria-label="Answer tone"
-            className="absolute inset-0 cursor-pointer opacity-0"
-          >
-            {TONES.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {sendButton}
-      </div>
-    </form>
+      quickPrompts={SUGGESTIONS}
+      placeholder={connected ? "Ask about your training" : "Ask anything"}
+      sidebarOpen={sidebarOpen}
+      onToggleSidebar={() => {
+        setMobileSidebar(false);
+        setSidebarOpen((open) => !open);
+      }}
+      onNewChat={newChat}
+      onOpenSettings={() => setSettingsOpen(true)}
+      onConnect={connectGarmin}
+      textareaRef={textareaRef}
+    />
   );
 
   return (
@@ -1264,6 +1225,7 @@ export function ChatApp() {
                     onEdit={(text) => void editMessage(activeChat.id, message.id, text)}
                     onRegenerate={() => void regenerate(activeChat.id, message.id)}
                     onFeedback={(value) => setFeedback(activeChat.id, message.id, value)}
+                    onFollowUp={(text) => void send(text)}
                   />
                 ))}
                 <div ref={endRef} className="h-2" />
@@ -1345,6 +1307,7 @@ function MessageBubble({
   onEdit,
   onRegenerate,
   onFeedback,
+  onFollowUp,
 }: {
   message: Message;
   running: boolean;
@@ -1353,6 +1316,7 @@ function MessageBubble({
   onEdit: (text: string) => void;
   onRegenerate: () => void;
   onFeedback: (value: "up" | "down") => void;
+  onFollowUp: (text: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -1560,6 +1524,38 @@ function MessageBubble({
           ))}
         </div>
       )}
+
+      {!running && canRegenerate && (message.followups?.length ?? 0) > 0 && (
+        <FollowUps items={message.followups ?? []} onPick={onFollowUp} />
+      )}
+    </div>
+  );
+}
+
+/** Two questions the model proposed as the natural next turn. */
+function FollowUps({ items, onPick }: { items: string[]; onPick: (text: string) => void }) {
+  return (
+    <div className="mt-6 max-w-[620px]">
+      <p className="text-[13px] font-medium text-muted-foreground">Follow-ups</p>
+      <div className="mt-2 border-t border-border/70">
+        {items.map((item) => (
+          <button
+            key={item}
+            type="button"
+            onClick={() => {
+              haptic("tap");
+              onPick(item);
+            }}
+            className="group flex w-full items-center gap-3 border-b border-border/70 py-3 pr-1 text-left text-[15px] leading-snug text-foreground/90 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <CornerLeftUp
+              className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-hover:-translate-y-0.5"
+              strokeWidth={1.7}
+            />
+            <span className="min-w-0 flex-1">{item}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

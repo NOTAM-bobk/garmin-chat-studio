@@ -5,6 +5,11 @@ Object.defineProperty(window, "scrollTo", {
   value: () => {},
 });
 
+Object.defineProperty(Element.prototype, "scrollIntoView", {
+  writable: true,
+  value: () => {},
+});
+
 Object.defineProperty(window, "matchMedia", {
   writable: true,
   value: (query: string) => ({

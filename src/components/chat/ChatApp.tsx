@@ -1531,14 +1531,14 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
             </GlowButton>
           )}
 
-          <div className="mt-1 space-y-0.5 border-t border-sidebar-border/60 pt-1">
+          <div className="mt-1 flex gap-0.5 overflow-x-auto border-t border-sidebar-border/60 pt-1 [scrollbar-width:none] md:block md:space-y-0.5">
             <button
               onClick={() => {
                 haptic("tap");
                 setShareOpen(true);
                 setMobileSidebar(false);
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+              className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 md:w-full md:gap-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
             >
               <Share2 className="size-3.5" />
               Share
@@ -1549,7 +1549,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
                 setSettingsOpen(true);
                 setMobileSidebar(false);
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+              className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 md:w-full md:gap-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
             >
               <Settings2 className="size-3.5" />
               Settings
@@ -1560,14 +1560,14 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
                 setSearchOpen(true);
                 setMobileSidebar(false);
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+              className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 md:w-full md:gap-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
             >
               <Search className="size-3.5" />
               Search
             </button>
             <button
               onClick={() => setWelcomeOpen(true)}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+              className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 md:w-full md:gap-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
             >
               <CircleHelp className="size-3.5" />
               How it works
@@ -1575,7 +1575,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
             <a
               href="/blog"
               onClick={() => setMobileSidebar(false)}
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+              className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 md:w-full md:gap-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
             >
               <BookOpen className="size-3.5" />
               Blog
@@ -1584,7 +1584,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
               href="https://fundrazr.com/62nDBa"
               target="_blank"
               rel="noreferrer noopener"
-              className="group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+              className="group flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 md:w-full md:gap-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
             >
               <Heart className="size-3.5 text-rose-500 transition-transform duration-200 group-hover:scale-110" />
               Donate

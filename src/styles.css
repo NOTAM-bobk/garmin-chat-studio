@@ -550,20 +550,49 @@
   animation: hint-out 320ms ease-in both;
 }
 
+/* Upgrade pill: deep blue dotted glow fading into black. */
+:root {
+  --upgrade-blue: oklch(0.32 0.2 265);
+  --upgrade-black: oklch(0.12 0 0);
+  --upgrade-text: oklch(0.99 0 0);
+}
+
+.upgrade-pill {
+  position: relative;
+  overflow: hidden;
+  color: var(--upgrade-text);
+  background: linear-gradient(90deg, var(--upgrade-blue) 0%, var(--upgrade-black) 62%);
+  border: 1px solid oklch(0.3 0.01 260);
+  box-shadow:
+    inset 1px 1px 0 oklch(0.8 0.05 265 / 55%),
+    -2px 2px 10px -4px oklch(0.45 0.25 265 / 70%);
+  transition: filter 160ms ease, transform 160ms ease;
+}
+
+.upgrade-pill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(oklch(0.9 0.05 265 / 35%) 0.6px, transparent 0.8px);
+  background-size: 5px 5px;
+  mask-image: linear-gradient(90deg, black 0%, transparent 50%);
+  -webkit-mask-image: linear-gradient(90deg, black 0%, transparent 50%);
+}
+
+.upgrade-pill:hover {
+  filter: brightness(1.15);
+}
+
+.upgrade-pill:active {
+  transform: scale(0.98);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  *,
+  *:not(.prompt-bar-glow),
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
-  }
-}
-
-/* The continuously rotating gradient repaints the composer on every frame.
-   Keep it static on touch-first devices to save mobile GPU/battery. */
-@media (hover: none) {
-  .prompt-bar-glow {
-    animation: none;
   }
 }

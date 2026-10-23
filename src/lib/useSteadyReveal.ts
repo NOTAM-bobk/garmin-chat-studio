@@ -29,21 +29,24 @@ export function useSteadyReveal(target: string, streaming: boolean): string {
       const total = targetRef.current.length;
       const backlog = total - visibleRef.current;
 
-      if (backlog > 0) {
-        const rate = streamingRef.current ? Math.min(2400, 320 + backlog * 3) : 4200; // finishing flush when the stream has already closed
-        const step = Math.max(1, Math.round((rate * dt) / 1000));
-        const next = Math.min(total, visibleRef.current + step);
-        if (next !== visibleRef.current) {
-          visibleRef.current = next;
-          // Repaint at ~30fps; markdown re-parsing every frame is wasteful.
-          if (next >= total || now - painted >= 32) {
-            painted = now;
-            setVisible(next);
-          }
+      // A new target length (or a streaming-state change) starts a fresh effect,
+      // so an idle stream does not need to keep a frame callback alive.
+      if (backlog <= 0) return;
+
+      const rate = streamingRef.current ? Math.min(2400, 320 + backlog * 3) : 4200; // finishing flush when the stream has already closed
+      const step = Math.max(1, Math.round((rate * dt) / 1000));
+      const next = Math.min(total, visibleRef.current + step);
+      if (next !== visibleRef.current) {
+        visibleRef.current = next;
+        // Repaint at ~30fps; markdown re-parsing every frame is wasteful.
+        if (next >= total || now - painted >= 32) {
+          painted = now;
+          setVisible(next);
         }
       }
 
-      frame = requestAnimationFrame(tick);
+      // Stop once caught up. The effect restarts when another token arrives.
+      if (next < total) frame = requestAnimationFrame(tick);
     };
 
     frame = requestAnimationFrame(tick);

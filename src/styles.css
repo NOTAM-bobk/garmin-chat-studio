@@ -559,3 +559,11 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* The continuously rotating gradient repaints the composer on every frame.
+   Keep it static on touch-first devices to save mobile GPU/battery. */
+@media (hover: none) {
+  .prompt-bar-glow {
+    animation: none;
+  }
+}

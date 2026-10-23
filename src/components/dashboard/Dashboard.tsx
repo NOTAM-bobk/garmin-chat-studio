@@ -116,7 +116,7 @@ function Gauge({ value, color, label }: { value: number; color: string; label: s
 function renderWidget(id: WidgetId): ReactNode {
   switch (id) {
     case "readiness":
-      return <Gauge value={78} color="var(--chart-1)" label="High · ready to train" />;
+      return <Gauge value={78} color="var(--chart-1)" label="Ready to train" />;
     case "steps":
       return <Gauge value={84} color="var(--chart-3)" label="8,412 / 10,000" />;
     case "battery":

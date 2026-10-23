@@ -1440,6 +1440,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         <div className="px-2 pb-2">
           <a
             href="/upgrade"
+            aria-label="Upgrade"
             onClick={() => {
               haptic("tap");
               setMobileSidebar(false);

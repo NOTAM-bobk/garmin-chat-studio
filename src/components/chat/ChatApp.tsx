@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Activity,
+  ArrowDown,
   ArrowUpRight,
   BookOpen,
   CalendarDays,
@@ -114,7 +115,16 @@ import {
   type Memory,
 } from "@/lib/memory";
 import { haptic, readHapticsSetting, writeHapticsSetting } from "@/lib/haptics";
-import { describeWebTool, isCitationLabel, isWebTool, requestWebTool, webTools } from "@/lib/web";
+import {
+  describeWebTool,
+  isCitationLabel,
+  isWebTool,
+  pruneWebCalls,
+  requestWebTool,
+  webLimitReason,
+  webTools,
+} from "@/lib/web";
+import { thoughtPlan } from "@/lib/thoughts";
 import { cn } from "@/lib/utils";
 import {
   listPuterModels,
@@ -285,6 +295,7 @@ Web research:
 - Search in natural language, skim the excerpts, then read the one or two pages that actually carry the evidence. Do not describe a page you have not opened.
 - Cite inline, right after the sentence the source supports, with the bare domain as the link text: [react.dev](https://react.dev/learn). Two to four sources per answer is plenty, and never invent a URL or a publication date.
 - Quote numbers, sample sizes and dates exactly, and say when a source is old, single-study, or contradicted by the user's own data.
+- Each answer gets a small lookup budget (searches and page reads together). Spend it on the pages that change the answer, prefer one good read over three searches, and if the budget runs out say what you could not verify.
 - If the web is unavailable or returns nothing useful, say so in one line and answer as general guidance.
 
 Charts:
@@ -373,6 +384,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
   const [syncState, setSyncState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [haptics, setHaptics] = useState(true);
   const [renamingChat, setRenamingChat] = useState<Chat | null>(null);
+  const [showJump, setShowJump] = useState(false);
 
   const [status, setStatus] = useState<GarminStatus | null>(null);
   const [garminTools, setGarminTools] = useState<GarminTool[]>([]);
@@ -385,6 +397,8 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  /** Timestamps of recent web lookups, so the research budget survives turns. */
+  const webWindowRef = useRef<number[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const stickRef = useRef(true);
 
@@ -621,12 +635,24 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
   useEffect(() => {
     if (!stickRef.current) return;
     endRef.current?.scrollIntoView({ block: "end" });
+    setShowJump(false);
   }, [activeChat?.messages]);
 
   function onScroll() {
     const element = scrollRef.current;
     if (!element) return;
-    stickRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
+    const distance = element.scrollHeight - element.scrollTop - element.clientHeight;
+    stickRef.current = distance < 120;
+    // Far enough up that the newest message is out of sight.
+    setShowJump(distance > 320);
+  }
+
+  /** Back to the newest message, and re-stick so streamed text follows. */
+  function jumpToLatest() {
+    haptic("tap");
+    stickRef.current = true;
+    setShowJump(false);
+    endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }
 
   /** Select a thread, hopping to its own subdomain when chats are served there. */
@@ -1038,6 +1064,25 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
       ),
     ];
 
+    // Wording varies per turn and per round; see thoughtPlan.
+    const thoughts = thoughtPlan(MAX_TOOL_ROUNDS);
+    /** Web lookups spent on this answer. The rolling window spans turns. */
+    let webCalls = 0;
+    const runToolCall = async (
+      name: string,
+      input: Record<string, unknown>,
+    ): Promise<ToolResult> => {
+      if (isMemoryTool(name)) return handleMemoryTool(name, input);
+      if (isDiscoveryTool(name)) return discover(input);
+      if (!isWebTool(name)) return requestTool(name, input);
+      const now = Date.now();
+      const blocked = webLimitReason(webCalls, webWindowRef.current, now);
+      if (blocked) return { ok: false, isError: true, text: blocked };
+      webCalls += 1;
+      webWindowRef.current = [...pruneWebCalls(webWindowRef.current, now), now];
+      return requestWebTool(name, input);
+    };
+
     try {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         if (controller.signal.aborted) break;
@@ -1047,7 +1092,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         addStep({
           id: thinkingId,
           kind: "thinking",
-          label: round === 0 ? "Reading your question" : "Reviewing your data",
+          label: thoughts[round] ?? "Thinking it through",
           status: "active",
         });
 
@@ -1140,13 +1185,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
           try {
             const local = isMemoryTool(call.name);
             const discovery = isDiscoveryTool(call.name);
-            const result = local
-              ? handleMemoryTool(call.name, call.input)
-              : isWebTool(call.name)
-                ? await requestWebTool(call.name, call.input)
-                : discovery
-                  ? discover(call.input)
-                  : await requestTool(call.name, call.input);
+            const result = await runToolCall(call.name, call.input);
             history.push({ role: "tool", tool_call_id: call.id, content: result.text });
             patchStep(stepId, {
               status: result.ok ? "done" : "error",
@@ -1159,7 +1198,9 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
                   ? extraTools.length > 0
                     ? `${extraTools.length} Garmin tools now loaded`
                     : "no matching tool"
-                  : `${formatBytes(result.text)} · ${result.ok ? "loaded" : "tool reported an error"}`,
+                  : isWebTool(call.name) && !result.ok
+                    ? "web research paused"
+                    : `${formatBytes(result.text)} · ${result.ok ? "loaded" : "tool reported an error"}`,
             });
           } catch (caught) {
             const message = errorText(caught);
@@ -1945,28 +1986,44 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
           </div>
         ) : (
           <>
-            <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto w-full max-w-3xl space-y-7 px-4 py-6">
-                {activeChat.messages.map((message, index) => (
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    running={busy && message.id === activeChat.messages.at(-1)?.id}
-                    canRegenerate={
-                      !busy &&
-                      message.role === "assistant" &&
-                      index === activeChat.messages.length - 1 &&
-                      activeChat.messages[index - 1]?.role === "user"
-                    }
-                    canEdit={!busy}
-                    onEdit={(text) => void editMessage(activeChat.id, message.id, text)}
-                    onRegenerate={() => void regenerate(activeChat.id, message.id)}
-                    onFeedback={(value) => setFeedback(activeChat.id, message.id, value)}
-                    onFollowUp={(text) => void send(text)}
-                  />
-                ))}
-                <div ref={endRef} className="h-2" />
+            <div className="relative min-h-0 flex-1">
+              <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
+                <div className="mx-auto w-full max-w-3xl space-y-7 px-4 py-6">
+                  {activeChat.messages.map((message, index) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      running={busy && message.id === activeChat.messages.at(-1)?.id}
+                      canRegenerate={
+                        !busy &&
+                        message.role === "assistant" &&
+                        index === activeChat.messages.length - 1 &&
+                        activeChat.messages[index - 1]?.role === "user"
+                      }
+                      canEdit={!busy}
+                      onEdit={(text) => void editMessage(activeChat.id, message.id, text)}
+                      onRegenerate={() => void regenerate(activeChat.id, message.id)}
+                      onFeedback={(value) => setFeedback(activeChat.id, message.id, value)}
+                      onFollowUp={(text) => void send(text)}
+                    />
+                  ))}
+                  <div ref={endRef} className="h-2" />
+                </div>
               </div>
+
+              {showJump && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={jumpToLatest}
+                    aria-label="Jump to latest message"
+                    className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-border bg-card/95 px-2.5 py-1.5 text-[11.5px] text-muted-foreground shadow-md backdrop-blur transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <ArrowDown className="size-3.5" />
+                    Latest
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="shrink-0 bg-background">

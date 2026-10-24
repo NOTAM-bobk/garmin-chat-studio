@@ -79,6 +79,42 @@ export const webTools: ToolSpec[] = [
   },
 ];
 
+/* ------------------------------------------------------------ rate limiting */
+
+/** Lookups one answer may spend. */
+export const WEB_TURN_LIMIT = 6;
+/** Lookups allowed across the rolling window, per browser tab. */
+export const WEB_WINDOW_LIMIT = 16;
+/** Length of that rolling window. */
+export const WEB_WINDOW_MS = 10 * 60_000;
+
+/** Drop lookups that have aged out of the window. */
+export function pruneWebCalls(calls: number[], now: number): number[] {
+  return calls.filter((at) => now - at < WEB_WINDOW_MS);
+}
+
+/**
+ * Why a web lookup should be refused right now, or null when it may run.
+ * Both web_search and web_read count: they hit the same paid API.
+ */
+export function webLimitReason(
+  turnCalls: number,
+  windowCalls: number[],
+  now = Date.now(),
+): string | null {
+  if (turnCalls >= WEB_TURN_LIMIT) {
+    return `Web research is paused for this answer: the ${WEB_TURN_LIMIT}-lookup budget is spent. Answer from the sources already gathered, and say what you could not check.`;
+  }
+  const recent = pruneWebCalls(windowCalls, now);
+  if (recent.length >= WEB_WINDOW_LIMIT) {
+    const oldest = recent[0] ?? now;
+    const minutes = Math.max(1, Math.ceil((WEB_WINDOW_MS - (now - oldest)) / 60_000));
+    const window = Math.round(WEB_WINDOW_MS / 60_000);
+    return `Web research is rate limited: ${WEB_WINDOW_LIMIT} lookups per ${window} minutes. Try again in about ${minutes} ${minutes === 1 ? "minute" : "minutes"}, or answer from what you already have.`;
+  }
+  return null;
+}
+
 const WEB_TOOL_NAMES = new Set(webTools.map((tool) => tool.function.name));
 
 export function isWebTool(name: string): boolean {

@@ -25,6 +25,7 @@ import {
   type ChartSeries,
   type ChartSpec,
 } from "@/lib/chart";
+import { cn } from "@/lib/utils";
 
 const SERIES_COLORS = [
   "var(--color-chart-1)",
@@ -98,8 +99,11 @@ function ChartTooltip({
   );
 }
 
-/** Render a chart the assistant asked for, using the shared theme tokens. */
-export function ChatChart({ spec }: { spec: ChartSpec }) {
+/**
+ * Render a chart the assistant asked for, using the shared theme tokens.
+ * `bare` drops the figure chrome so the chart can sit inside another card.
+ */
+export function ChatChart({ spec, bare = false }: { spec: ChartSpec; bare?: boolean }) {
   const [mounted, setMounted] = useState(false);
   const [hidden, setHidden] = useState<string[]>([]);
   useEffect(() => setMounted(true), []);
@@ -286,15 +290,29 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
           }))
         : [];
 
-  const chartHeight = spec.type === "pie" ? 220 : xLabel ? 246 : 228;
+  const chartHeight = bare
+    ? spec.type === "pie"
+      ? 190
+      : xLabel
+        ? 224
+        : 206
+    : spec.type === "pie"
+      ? 220
+      : xLabel
+        ? 246
+        : 228;
 
   return (
     <figure
       aria-label={spec.title ?? "Chart"}
-      className="my-4 overflow-hidden rounded-xl border border-border bg-card p-3"
+      className={
+        bare
+          ? "overflow-hidden"
+          : "my-4 overflow-hidden rounded-xl border border-border bg-card p-3"
+      }
     >
       {(spec.title || spec.unit) && (
-        <figcaption className="mb-2 flex items-baseline gap-2 px-1">
+        <figcaption className={cn("mb-2 flex items-baseline gap-2", !bare && "px-1")}>
           {spec.title && <span className="text-[12.5px] font-medium">{spec.title}</span>}
           {spec.unit && (
             <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
@@ -305,7 +323,7 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
       )}
 
       {stats.length > 0 && (
-        <div className="mb-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 px-1">
+        <div className={cn("mb-2 flex flex-wrap items-baseline gap-x-4 gap-y-1", !bare && "px-1")}>
           {stats.map((stat) => (
             <span
               key={stat.key}
@@ -425,7 +443,7 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
       </div>
 
       {legend.length > 0 && (
-        <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-1 px-1">
+        <div className={cn("mt-1 flex flex-wrap items-center gap-x-1 gap-y-1", !bare && "px-1")}>
           {legend.map((item) =>
             spec.type === "pie" ? (
               <span

@@ -168,7 +168,7 @@ function stringField(value: unknown): string {
 }
 
 /** Plain text out of a non-streamed Puter response, whatever shape it arrives in. */
-function responseText(raw: unknown): string {
+export function responseText(raw: unknown): string {
   if (typeof raw === "string") return raw;
   if (!raw || typeof raw !== "object") return "";
   const record = raw as Record<string, unknown>;

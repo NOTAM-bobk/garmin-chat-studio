@@ -1,11 +1,15 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatApp } from "@/components/chat/ChatApp";
 
 beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("garmin-chat:onboarded:v1", "1");
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("empty-state presets", () => {
@@ -22,6 +26,32 @@ describe("empty-state presets", () => {
     expect(await screen.findByRole("button", { name: "HRV trend" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Long run check" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Sleep debrief" })).not.toBeInTheDocument();
+  });
+
+  it("deals a new set of prompts from the shuffle button", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    render(<ChatApp />);
+
+    expect(await screen.findByRole("button", { name: "Sleep debrief" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Shuffle suggestions" }));
+
+    expect(await screen.findByRole("button", { name: "HRV trend" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Long run check" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sleep debrief" })).not.toBeInTheDocument();
+  });
+
+  it("offers both connection options instead of jumping to the MCP sign-in", async () => {
+    render(<ChatApp />);
+
+    const [connect] = await screen.findAllByRole("button", { name: /Connect Garmin/ });
+    fireEvent.click(connect!);
+
+    expect(
+      await screen.findByRole("button", { name: /Connect with Garmin MCP/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Use a personal API key/ })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/");
   });
 
   it("opens search and uses the panel icon and glow connect button", async () => {

@@ -28,6 +28,7 @@ import {
   Search,
   Settings2,
   Share2,
+  Shuffle,
   Sparkles,
   SquarePen,
   ThumbsDown,
@@ -763,6 +764,33 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
       return;
     }
     window.location.assign("/api/garmin/connect");
+  }
+
+  /** Every "Connect Garmin" entry point offers MCP or a personal key first. */
+  function openConnect() {
+    haptic("tap");
+    if (status && !status.configured) {
+      toast.error("Garmin isn't configured", {
+        description: "Add SESSION_SECRET to this deployment's environment variables.",
+      });
+      return;
+    }
+    setMobileSidebar(false);
+    setConnectOpen(true);
+  }
+
+  /** Step to a different window of empty-state prompts. */
+  function shufflePresets() {
+    haptic("select");
+    const spread = Math.max(1, PRESETS.length - PRESET_COUNT);
+    const step = PRESET_COUNT + Math.floor(Math.random() * spread);
+    const next = (presetOffset + step) % PRESETS.length;
+    setPresetOffset(next);
+    try {
+      localStorage.setItem(PRESET_KEY, String((next + PRESET_COUNT) % PRESETS.length));
+    } catch {
+      // Storage blocked: the current view is still shuffled.
+    }
   }
 
   async function disconnectGarmin() {
@@ -1633,7 +1661,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
               </button>
             </div>
           ) : (
-            <GlowButton fullWidth onClick={connectGarmin} size="sm" className="mt-0.5">
+            <GlowButton fullWidth onClick={openConnect} size="sm" className="mt-0.5">
               <Plug className="size-3.5" />
               Connect Garmin
             </GlowButton>
@@ -1765,7 +1793,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
                 Connected
               </span>
             ) : (
-              <GlowButton onClick={connectGarmin} size="sm" className="hidden sm:inline-flex">
+              <GlowButton onClick={openConnect} size="sm" className="hidden sm:inline-flex">
                 <Plug className="size-3.5" />
                 Connect Garmin
               </GlowButton>
@@ -1781,7 +1809,20 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         </header>
 
         {!activeChat ? (
-          <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 pb-16">
+          <div className="relative flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 pb-16">
+            <button
+              type="button"
+              onClick={shufflePresets}
+              aria-label="Shuffle suggestions"
+              title="Shuffle suggestions"
+              className="group/shuffle absolute right-3 top-3 grid size-9 place-items-center rounded-full text-muted-foreground/50 transition-colors duration-200 hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground sm:right-5 sm:top-5"
+            >
+              <Shuffle
+                className="size-4 transition-transform duration-300 group-hover/shuffle:rotate-180"
+                strokeWidth={1.8}
+              />
+            </button>
+
             <h1 className="text-center text-[26px] font-medium tracking-tight sm:text-[30px]">
               Ask me about your training
             </h1>
@@ -1810,7 +1851,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
             <div className="mt-4 flex max-w-3xl flex-wrap justify-center gap-2">
               {presets.map((suggestion, index) => (
                 <button
-                  key={suggestion.title}
+                  key={`${presetOffset}-${suggestion.title}`}
                   onClick={() => void send(suggestion.prompt)}
                   style={{ animationDelay: `${index * 70}ms` }}
                   className={cn(

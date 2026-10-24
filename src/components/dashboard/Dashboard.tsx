@@ -19,6 +19,7 @@ import {
   Waves,
 } from "lucide-react";
 
+import { ConnectDialog } from "@/components/chat/ConnectDialog";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_LAYOUT,
@@ -175,6 +176,7 @@ export function Dashboard() {
   const [data, setData] = useState<WidgetDataMap>({});
   const [refreshing, setRefreshing] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [connectOpen, setConnectOpen] = useState(false);
 
   useEffect(() => {
     setLayout(parseLayout(localStorage.getItem(STORAGE_KEY)));
@@ -251,6 +253,11 @@ export function Dashboard() {
     void loadData();
   }, [loadData]);
 
+  const connect = () => {
+    if (status?.configured === false) return;
+    setConnectOpen(true);
+  };
+
   const save = (next: WidgetSlot[]) => {
     setLayout(next);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -259,6 +266,20 @@ export function Dashboard() {
 
   return (
     <div className="min-h-dvh bg-background text-foreground">
+      <ConnectDialog
+        open={connectOpen}
+        onOpenChange={setConnectOpen}
+        configured={status?.configured ?? true}
+        onMcp={() => {
+          setConnectOpen(false);
+          window.location.assign("/api/garmin/connect");
+        }}
+        onConnected={() => {
+          setConnectOpen(false);
+          void loadData();
+        }}
+      />
+
       <header className="mx-auto grid h-14 w-full max-w-6xl grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 sm:px-4">
         <a href="/" className="inline-flex w-fit items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13.5px] text-muted-foreground hover:bg-accent hover:text-foreground">
           <ArrowLeft className="size-4" /> Back to chat
@@ -331,7 +352,7 @@ export function Dashboard() {
             {status?.configured === false ? (
               <p className="mt-5 rounded-xl bg-destructive/5 px-3 py-2 text-[12.5px] text-destructive">Garmin sign-in is not configured on this deployment.</p>
             ) : (
-              <a href="/api/garmin/connect" className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-[13.5px] font-medium text-primary-foreground hover:opacity-90">Connect Garmin</a>
+              <button onClick={connect} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-[13.5px] font-medium text-primary-foreground hover:opacity-90">Connect Garmin</button>
             )}
             {pageError && <button onClick={() => void loadData()} className="mt-3 text-[12px] text-muted-foreground underline">Try again</button>}
           </section>

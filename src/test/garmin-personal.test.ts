@@ -56,6 +56,43 @@ describe("personal API toolset", () => {
     expect(built?.path).toContain("limit=50");
   });
 
+  it("reaches the hydration, goal, nutrition and fitness-age endpoints", () => {
+    expect(
+      personalPath("get_hydration", { start_date: "2026-10-01", end_date: "2026-10-07" }),
+    ).toEqual({
+      path: "/usersummary-service/stats/hydration/daily/2026-10-01/2026-10-07",
+      trimmed: false,
+    });
+    expect(
+      personalPath("get_weight_goal", { start_date: "2026-10-01", end_date: "2026-10-07" })?.path,
+    ).toBe("/goal-service/goal/user/effective/weightgoal/2026-10-01/2026-10-07");
+    expect(personalPath("get_nutrition_logs", { date: "2026-10-01" })?.path).toBe(
+      "/nutrition-service/food/logs/2026-10-01",
+    );
+    expect(personalPath("get_fitness_age", { date: "2026-10-01" })?.path).toBe(
+      "/fitnessage-service/fitnessage/v2/2026-10-01",
+    );
+    expect(
+      personalPath("get_wellness_activity_summaries", {
+        start_date: "2026-10-01",
+        end_date: "2026-10-07",
+      })?.path,
+    ).toBe("/wellnessactivity-service/activity/summary/range/2026-10-01/2026-10-07");
+  });
+
+  it("sends a reference day with the cycle day view", () => {
+    expect(personalPath("get_menstrual_cycle_summary", { date: "2026-10-01" })?.path).toBe(
+      "/periodichealth-service/menstrualcycle/summary/2026-10-01",
+    );
+    expect(personalPath("get_menstrual_cycle_day", { date: "2026-10-01" })?.path).toBe(
+      "/periodichealth-service/menstrualcycle/dayview/2026-10-01?todayDate=2026-10-01",
+    );
+    expect(
+      personalPath("get_menstrual_cycle_day", { date: "2026-09-28", today_date: "2026-10-01" })
+        ?.path,
+    ).toBe("/periodichealth-service/menstrualcycle/dayview/2026-09-28?todayDate=2026-10-01");
+  });
+
   it("requires a numeric activity id and ignores unknown tools", () => {
     expect(() => personalPath("get_activity", {})).toThrow(/activity id/i);
     expect(personalPath("get_activity", { activity_id: 12345 })?.path).toBe(

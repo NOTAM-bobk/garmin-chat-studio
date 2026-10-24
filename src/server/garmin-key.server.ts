@@ -226,6 +226,84 @@ const SPECS: Spec[] = [
     }),
   },
   {
+    name: "get_hydration",
+    description:
+      "Daily hydration: goal, intake and sweat loss in millilitres. Up to 28 days per call.",
+    parameters: RANGE_FIELDS,
+    build: (args) => {
+      const { start, end, trimmed } = window(args, 28);
+      return { path: `/usersummary-service/stats/hydration/daily/${start}/${end}`, trimmed };
+    },
+  },
+  {
+    name: "get_fitness_age",
+    description:
+      "Garmin's fitness age for one date, with the VO2 max and activity inputs behind it.",
+    parameters: { type: "object", properties: { date: DATE_FIELD } },
+    build: (args) => ({
+      path: `/fitnessage-service/fitnessage/v2/${day(args, ["date", "calendarDate"])}`,
+    }),
+  },
+  {
+    name: "get_weight_goal",
+    description: "The active weight goal and its progress. Up to 90 days per call.",
+    parameters: RANGE_FIELDS,
+    build: (args) => {
+      const { start, end, trimmed } = window(args, 90);
+      return { path: `/goal-service/goal/user/effective/weightgoal/${start}/${end}`, trimmed };
+    },
+  },
+  {
+    name: "get_nutrition_logs",
+    description:
+      "Logged food for one day: meals, calories, macros and micronutrients, as recorded in Garmin Connect.",
+    parameters: { type: "object", properties: { date: DATE_FIELD } },
+    build: (args) => ({
+      path: `/nutrition-service/food/logs/${day(args, ["date", "calendarDate"])}`,
+    }),
+  },
+  {
+    name: "get_menstrual_cycle_summary",
+    description:
+      "Hormonal cycle summary for one date: current phase, cycle length and predictions. Empty when the user doesn't track it.",
+    parameters: { type: "object", properties: { date: DATE_FIELD } },
+    build: (args) => ({
+      path: `/periodichealth-service/menstrualcycle/summary/${day(args, ["date", "calendarDate"])}`,
+    }),
+  },
+  {
+    name: "get_menstrual_cycle_day",
+    description:
+      "The per-day hormonal cycle view: symptoms, bleeding, mood and cycle day for one date.",
+    parameters: {
+      type: "object",
+      properties: {
+        date: DATE_FIELD,
+        today_date: {
+          type: "string",
+          description: "The reference 'today', YYYY-MM-DD. Defaults to the same date.",
+        },
+      },
+    },
+    build: (args) => {
+      const date = day(args, ["date", "calendarDate"]);
+      const todayDate = readDate(args["today_date"]) ?? date;
+      return {
+        path: `/periodichealth-service/menstrualcycle/dayview/${date}${query({ todayDate })}`,
+      };
+    },
+  },
+  {
+    name: "get_wellness_activity_summaries",
+    description:
+      "Everyday movement outside workouts: steps, floors, intensity minutes and active calories per day, plus the activity types Garmin detected. Up to 28 days per call.",
+    parameters: RANGE_FIELDS,
+    build: (args) => {
+      const { start, end, trimmed } = window(args, 28);
+      return { path: `/wellnessactivity-service/activity/summary/range/${start}/${end}`, trimmed };
+    },
+  },
+  {
     name: "get_body_composition",
     description: "Weigh-ins with weight, body fat and muscle mass. Up to 90 days per call.",
     parameters: RANGE_FIELDS,

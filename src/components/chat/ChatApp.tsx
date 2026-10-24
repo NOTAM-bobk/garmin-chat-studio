@@ -134,7 +134,18 @@ import {
   runRound,
   suggestFollowups,
   type AgentMessage,
+  type TurnEvent,
+  type TurnResult,
 } from "@/lib/puter";
+import {
+  answersToText,
+  askSpec,
+  isAskTool,
+  parseQuestions,
+  type AskAnswers,
+  type AskQuestion,
+} from "@/lib/questions";
+import { AskCard } from "@/components/chat/AskCard";
 import {
   SIGNED_OUT,
   loadCloudChats,
@@ -285,6 +296,11 @@ Deep dives on activities:
 - Compare the session with the user's own 7- and 30-day baseline for the same sport, then say whether it was normal, better or worse and by how much.
 - If a deeper tool is missing or errors, say which layer you could not read instead of implying the session was ordinary.
 
+Asking the user:
+- When the plan genuinely depends on something only the athlete knows — the goal race and its date, which days they can train, an injury, the equipment they own, how long a session can run — ask instead of assuming. Write one short sentence, then call ask_questions with one to three questions.
+- Give each question two to five short options whenever the plausible answers are predictable, so it is one tap. Use kind "multi" when more than one answer can apply, and "text" only when the answer cannot be listed.
+- Never ask for a number a Garmin tool can read, never ask what the user already told you, and do not use questions to stall. After calling it, stop: the answers arrive as their next message.
+
 Tool coverage:
 - The core Garmin readings are loaded already. Anything else in the account — gear, badges, courses, nutrition, devices, weight, blood pressure, lactate threshold, power curves, pregnancy, menstrual cycle, workout upload — needs find_garmin_tools first: call it with two or three words, then call the tool it returns on your next turn.
 - Never tell the user a metric or action is unsupported before you have searched the catalogue.
@@ -385,6 +401,10 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
   const [haptics, setHaptics] = useState(true);
   const [renamingChat, setRenamingChat] = useState<Chat | null>(null);
   const [showJump, setShowJump] = useState(false);
+  /** Garmin rejected the stored session; readings need a fresh sign-in. */
+  const [sessionExpired, setSessionExpired] = useState(false);
+  /** Answer text waiting for the transcript to carry the answered card. */
+  const [queuedAnswer, setQueuedAnswer] = useState<string | null>(null);
 
   const [status, setStatus] = useState<GarminStatus | null>(null);
   const [garminTools, setGarminTools] = useState<GarminTool[]>([]);
@@ -566,6 +586,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
       if (response.status === 401) {
         setStatus((previous) => (previous ? { ...previous, connected: false } : previous));
         setGarminTools([]);
+        setSessionExpired(true);
         setToolsError(payload.error ?? "Garmin session expired.");
         return [];
       }
@@ -596,7 +617,10 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
       const response = await fetch("/api/garmin/status", { cache: "no-store" });
       const payload = (await response.json()) as GarminStatus;
       setStatus(payload);
-      if (payload.connected) await refreshTools();
+      if (payload.connected) {
+        setSessionExpired(false);
+        await refreshTools();
+      }
     } catch {
       setStatus({ connected: false, configured: true, tools: 0, available: 0 });
     }
@@ -637,6 +661,14 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     endRef.current?.scrollIntoView({ block: "end" });
     setShowJump(false);
   }, [activeChat?.messages]);
+
+  // A queued answer waits for the previous turn to finish before sending.
+  useEffect(() => {
+    if (!queuedAnswer || busy) return;
+    setQueuedAnswer(null);
+    void send(queuedAnswer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- send is rebuilt each render; only the queue matters
+  }, [queuedAnswer, busy]);
 
   function onScroll() {
     const element = scrollRef.current;
@@ -835,6 +867,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     }
     setGarminTools([]);
     setToolsError(null);
+    setSessionExpired(false);
     setStatus((previous) =>
       previous ? { ...previous, connected: false, available: 0 } : previous,
     );
@@ -951,6 +984,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     if (response.status === 401) {
       setStatus((previous) => (previous ? { ...previous, connected: false } : previous));
       setGarminTools([]);
+      setSessionExpired(true);
       throw new Error(payload.error ?? "Garmin session expired. Reconnect to continue.");
     }
     if (!response.ok) {
@@ -1023,7 +1057,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     const discover = (input: Record<string, unknown>): ToolResult => {
       const query = typeof input["query"] === "string" ? input["query"] : "";
       const reserved =
-        memoryTools.length + webTools.length + 1 + baseSpecs.length + extraTools.length;
+        memoryTools.length + webTools.length + 2 + baseSpecs.length + extraTools.length;
       const room = Math.max(0, TOOL_CAP - reserved);
       if (room === 0) {
         return {
@@ -1066,6 +1100,11 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
 
     // Wording varies per turn and per round; see thoughtPlan.
     const thoughts = thoughtPlan(MAX_TOOL_ROUNDS);
+    const fallback = models.find((option) => option.id !== model) ?? null;
+    /** The model answering this turn; a fallback sticks for the rest of it. */
+    let activeModel = model;
+    /** Questions waiting on the user; set by the ask_questions tool. */
+    let pendingAsk: AskQuestion[] | null = null;
     /** Web lookups spent on this answer. The rolling window spans turns. */
     let webCalls = 0;
     const runToolCall = async (
@@ -1074,6 +1113,23 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     ): Promise<ToolResult> => {
       if (isMemoryTool(name)) return handleMemoryTool(name, input);
       if (isDiscoveryTool(name)) return discover(input);
+      if (isAskTool(name)) {
+        const questions = parseQuestions(input);
+        if (questions.length === 0) {
+          return {
+            ok: false,
+            isError: true,
+            text: "ask_questions needs one to three questions, each with a prompt.",
+          };
+        }
+        pendingAsk = questions;
+        patchMessage((message) => ({ ...message, ask: { questions } }));
+        return {
+          ok: true,
+          isError: false,
+          text: "The questions are on screen. Stop here: the answers arrive as the user's next message.",
+        };
+      }
       if (!isWebTool(name)) return requestTool(name, input);
       const now = Date.now();
       const blocked = webLimitReason(webCalls, webWindowRef.current, now);
@@ -1100,75 +1156,118 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         const tools = [
           ...memoryTools,
           ...webTools,
+          askSpec,
           ...(canDiscover ? [discoverySpec] : []),
           ...baseSpecs,
           ...toolSpecs(extraTools),
         ];
 
-        const turn = await runRound(history, {
-          model,
-          signal: controller.signal,
-          ...(tools.length > 0 && round < MAX_TOOL_ROUNDS - 1 ? { tools } : {}),
-          onEvent: (event) => {
-            if (event.type === "reasoning") {
-              setChats((previous) =>
-                previous.map((chat) =>
-                  chat.id === chatId
-                    ? {
-                        ...chat,
-                        messages: chat.messages.map((message) => {
-                          if (message.id !== assistantId) return message;
-                          return {
-                            ...message,
-                            steps: message.steps.map((step) =>
-                              step.id === thinkingId
-                                ? {
-                                    ...step,
-                                    text: `${step.text ?? ""}${event.text}`.slice(0, 8000),
-                                  }
-                                : step,
-                            ),
-                          };
-                        }),
-                      }
-                    : chat,
-                ),
-              );
-              return;
-            }
-
-            if (event.type === "text") {
-              appendText(event.text);
-              return;
-            }
-
-            // A tool call ends the thinking phase for this round.
-            patchStep(thinkingId, {
-              status: "done",
-              ms: performance.now() - thinkingStart,
-            });
-            const { label, detail } = isMemoryTool(event.call.name)
-              ? describeMemoryTool(event.call.name, event.call.input)
-              : isWebTool(event.call.name)
-                ? describeWebTool(event.call.name, event.call.input)
-                : isDiscoveryTool(event.call.name)
+        const handleEvent = (event: TurnEvent) => {
+          if (event.type === "reasoning") {
+            setChats((previous) =>
+              previous.map((chat) =>
+                chat.id === chatId
                   ? {
-                      label: "Looking up Garmin tools",
-                      detail: String(event.call.input["query"] ?? "").slice(0, 60),
+                      ...chat,
+                      messages: chat.messages.map((message) => {
+                        if (message.id !== assistantId) return message;
+                        return {
+                          ...message,
+                          steps: message.steps.map((step) =>
+                            step.id === thinkingId
+                              ? {
+                                  ...step,
+                                  text: `${step.text ?? ""}${event.text}`.slice(0, 8000),
+                                }
+                              : step,
+                          ),
+                        };
+                      }),
                     }
-                  : describeTool(event.call.name, event.call.input);
-            addStep({
-              id: `tool-${event.call.id}`,
-              kind: "tool",
-              label,
-              tool: event.call.name,
-              ...(detail ? { detail } : {}),
-              status: "active",
-            });
-          },
-        });
+                  : chat,
+              ),
+            );
+            return;
+          }
 
-        if (controller.signal.aborted) break;
+          if (event.type === "text") {
+            appendText(event.text);
+            return;
+          }
+
+          // A tool call ends the thinking phase for this round.
+          patchStep(thinkingId, {
+            status: "done",
+            ms: performance.now() - thinkingStart,
+          });
+          const { label, detail } = isMemoryTool(event.call.name)
+            ? describeMemoryTool(event.call.name, event.call.input)
+            : isWebTool(event.call.name)
+              ? describeWebTool(event.call.name, event.call.input)
+              : isDiscoveryTool(event.call.name)
+                ? {
+                    label: "Looking up Garmin tools",
+                    detail: String(event.call.input["query"] ?? "").slice(0, 60),
+                  }
+                : isAskTool(event.call.name)
+                  ? { label: "Asking you a question" }
+                  : describeTool(event.call.name, event.call.input);
+          addStep({
+            id: `tool-${event.call.id}`,
+            kind: "tool",
+            label,
+            tool: event.call.name,
+            ...(detail ? { detail } : {}),
+            status: "active",
+          });
+        };
+
+        // A provider can fail before the first token — unknown model, rejected
+        // schemas, rate limit — and that is safe to retry elsewhere. Once words
+        // are on screen a second model would duplicate them, so no retry then.
+        const progress = { events: 0 };
+        const attempt = (candidate: string) =>
+          runRound(history, {
+            model: candidate,
+            signal: controller.signal,
+            ...(tools.length > 0 && round < MAX_TOOL_ROUNDS - 1 ? { tools } : {}),
+            onEvent: (event) => {
+              progress.events += 1;
+              handleEvent(event);
+            },
+          });
+
+        let turn: TurnResult | null = null;
+        try {
+          turn = await attempt(activeModel);
+        } catch (caught) {
+          if (
+            controller.signal.aborted ||
+            isAbort(caught) ||
+            progress.events > 0 ||
+            !fallback ||
+            activeModel !== model
+          ) {
+            throw caught;
+          }
+          const switchId = `switch-${assistantId}-${round}`;
+          const switchStart = performance.now();
+          addStep({
+            id: switchId,
+            kind: "thinking",
+            label: `Switching to ${fallback.label}`,
+            status: "active",
+          });
+          toast(`Couldn't reach ${modelLabel}`, {
+            description: `Retrying this answer with ${fallback.label}.`,
+          });
+          progress.events = 0;
+          activeModel = fallback.id;
+          turn = await attempt(activeModel);
+          patchStep(switchId, { status: "done", ms: performance.now() - switchStart });
+        }
+
+        if (controller.signal.aborted || !turn) break;
 
         patchStep(thinkingId, {
           status: "done",
@@ -1216,13 +1315,16 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
             });
           }
         }
+
+        // Questions end the turn: the answers arrive as the next user message.
+        if (pendingAsk) break;
       }
 
       // A turn that produced no words is not finished business: a provider can
       // close a stream after reasoning alone, or the tool budget can run out.
       // Give the model one last pass with tools removed so it has to answer
       // from the data it already has, instead of stopping on the trace.
-      if (!controller.signal.aborted && !streamed.trim()) {
+      if (!controller.signal.aborted && !streamed.trim() && !pendingAsk) {
         const answerId = `answer-${assistantId}`;
         const startedAt = performance.now();
         addStep({
@@ -1242,7 +1344,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
               },
             ],
             {
-              model,
+              model: activeModel,
               signal: controller.signal,
               onEvent: (event) => {
                 if (event.type === "text") appendText(event.text);
@@ -1273,7 +1375,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
           const steps = message.steps.map((step) =>
             step.status === "active" ? { ...step, status: "done" as const } : step,
           );
-          if (message.content.trim()) return { ...message, steps };
+          if (message.content.trim() || message.ask) return { ...message, steps };
           return {
             ...message,
             content:
@@ -1308,13 +1410,13 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
 
     // Offer the next two questions from the finished answer. Best effort: an
     // empty list simply renders nothing.
-    if (!controller.signal.aborted && streamed.trim()) {
+    if (!controller.signal.aborted && streamed.trim() && !pendingAsk) {
       const followups = await suggestFollowups(
         [
           ...prior.map((message) => ({ role: message.role, content: message.content })),
           { role: "assistant", content: streamed },
         ],
-        model,
+        activeModel,
       );
       if (followups.length > 0) {
         patchMessage((message) => ({ ...message, followups }));
@@ -1400,6 +1502,35 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         false,
       );
     }
+  }
+
+  /** Record the user's answers on the message, then answer them in a new turn. */
+  function answerQuestions(
+    chatId: string,
+    messageId: string,
+    questions: AskQuestion[],
+    answers: AskAnswers,
+  ) {
+    const text = answersToText(questions, answers);
+    if (!text) return;
+    haptic("tap");
+    setChats((previous) =>
+      previous.map((chat) =>
+        chat.id === chatId
+          ? {
+              ...chat,
+              updated: Date.now(),
+              messages: chat.messages.map((message) =>
+                message.id === messageId && message.ask
+                  ? { ...message, ask: { ...message.ask, answers } }
+                  : message,
+              ),
+            }
+          : chat,
+      ),
+    );
+    // Sent after this render, so the transcript already shows the answers.
+    setQueuedAnswer(text);
   }
 
   async function regenerate(chatId: string, messageId: string) {
@@ -1540,6 +1671,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         }}
         onConnected={() => {
           setConnectOpen(false);
+          setSessionExpired(false);
           haptic("done");
           toast.success("Garmin connected with your key", {
             description:
@@ -1905,6 +2037,35 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
           </div>
         </header>
 
+        {sessionExpired && (
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-3 pt-2 sm:px-4">
+            <div
+              role="status"
+              className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2 text-[12.5px] leading-relaxed text-amber-800 dark:text-amber-200"
+            >
+              <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0 flex-1">
+                Your Garmin session expired, so new readings are paused. Everything already in this
+                chat is still here.
+              </span>
+              <button
+                type="button"
+                onClick={openConnect}
+                className="shrink-0 rounded-lg bg-amber-500/15 px-2 py-1 text-[11.5px] font-medium text-amber-900 transition-colors hover:bg-amber-500/25 dark:text-amber-100"
+              >
+                Reconnect
+              </button>
+              <button
+                type="button"
+                onClick={() => setSessionExpired(false)}
+                className="shrink-0 text-[11.5px] underline underline-offset-2 opacity-80 hover:opacity-100"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {!activeChat ? (
           <div className="relative flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 pb-16">
             <button
@@ -2005,6 +2166,9 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
                       onRegenerate={() => void regenerate(activeChat.id, message.id)}
                       onFeedback={(value) => setFeedback(activeChat.id, message.id, value)}
                       onFollowUp={(text) => void send(text)}
+                      onAnswer={(questions, answers) =>
+                        answerQuestions(activeChat.id, message.id, questions, answers)
+                      }
                     />
                   ))}
                   <div ref={endRef} className="h-2" />
@@ -2128,6 +2292,7 @@ function MessageBubble({
   onRegenerate,
   onFeedback,
   onFollowUp,
+  onAnswer,
 }: {
   message: Message;
   running: boolean;
@@ -2137,10 +2302,12 @@ function MessageBubble({
   onRegenerate: () => void;
   onFeedback: (value: "up" | "down") => void;
   onFollowUp: (text: string) => void;
+  onAnswer: (questions: AskQuestion[], answers: AskAnswers) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
+  const ask = message.ask;
   const revealed = useSteadyReveal(message.content, running);
   const revealing = running && revealed.length < message.content.length;
   const markdown = useMemo(
@@ -2237,7 +2404,7 @@ function MessageBubble({
     );
   }
 
-  const empty = !revealed && message.steps.length === 0 && !message.error;
+  const empty = !revealed && message.steps.length === 0 && !message.error && !ask;
 
   const actions: {
     key: string;
@@ -2322,6 +2489,14 @@ function MessageBubble({
         </div>
       )}
 
+      {ask && (
+        <AskCard
+          questions={ask.questions}
+          answers={ask.answers}
+          onAnswer={(answers) => onAnswer(ask.questions, answers)}
+        />
+      )}
+
       {message.error && (
         <div className="mt-2 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-[12.5px] text-destructive">
           <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
@@ -2351,9 +2526,12 @@ function MessageBubble({
         </div>
       )}
 
-      {!running && canRegenerate && (message.followups?.length ?? 0) > 0 && (
-        <FollowUps items={message.followups ?? []} onPick={onFollowUp} />
-      )}
+      {!running &&
+        canRegenerate &&
+        !(ask && !ask.answers) &&
+        (message.followups?.length ?? 0) > 0 && (
+          <FollowUps items={message.followups ?? []} onPick={onFollowUp} />
+        )}
     </div>
   );
 }

@@ -196,12 +196,18 @@ export function redirect(location: string, cookies: string[] = []): Response {
   return new Response(null, { status: 302, headers });
 }
 
-export function jsonResponse(body: unknown, status = 200, cookies: string[] = []): Response {
+export function jsonResponse(
+  body: unknown,
+  status = 200,
+  cookies: string[] = [],
+  extra: Record<string, string> = {},
+): Response {
   const headers = new Headers({
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
   });
   for (const cookie of cookies) headers.append("set-cookie", cookie);
+  for (const [name, value] of Object.entries(extra)) headers.set(name, value);
   return new Response(JSON.stringify(body), { status, headers });
 }
 

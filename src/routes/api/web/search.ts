@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { jsonResponse } from "@/server/garmin.server";
+import { checkWebBudget } from "@/server/web-budget.server";
 import { searchWeb, webConfigured, webSetupHint } from "@/server/web.server";
 
 type SearchBody = { query?: unknown; numResults?: unknown };
@@ -27,6 +28,13 @@ export const Route = createFileRoute("/api/web/search")({
             ? body.numResults
             : 5;
         const numResults = Math.min(Math.max(Math.round(requested), 3), 8);
+
+        const limited = checkWebBudget(request);
+        if (limited) {
+          return jsonResponse({ error: limited.message }, 429, [], {
+            "retry-after": String(Math.ceil(limited.retryAfterMs / 1000)),
+          });
+        }
 
         try {
           const { sources } = await searchWeb(query.slice(0, 400), numResults);

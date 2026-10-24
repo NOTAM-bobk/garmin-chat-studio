@@ -1,4 +1,9 @@
+import { parseQuestions, type AskAnswers, type AskQuestion } from "@/lib/questions";
+
 export type StepStatus = "active" | "done" | "error";
+
+/** A questionnaire the assistant asked, plus what the user chose. */
+export type AskBlock = { questions: AskQuestion[]; answers?: AskAnswers };
 
 export type TraceStep = {
   id: string;
@@ -27,6 +32,8 @@ export type Message = {
   image?: string;
   /** Local thumbs feedback, kept in this browser only. */
   feedback?: "up" | "down";
+  /** Questions this answer asked the user, and the answers once given. */
+  ask?: AskBlock;
 };
 
 export type Chat = {
@@ -85,6 +92,7 @@ function sanitizeMessage(raw: unknown): Message | null {
       : undefined;
   const feedback =
     record["feedback"] === "up" ? "up" : record["feedback"] === "down" ? "down" : undefined;
+  const ask = sanitizeAsk(record["ask"]);
   return {
     id: typeof record["id"] === "string" ? record["id"] : uid(),
     role,
@@ -94,6 +102,30 @@ function sanitizeMessage(raw: unknown): Message | null {
     ...(followups.length > 0 ? { followups } : {}),
     ...(image ? { image } : {}),
     ...(feedback ? { feedback } : {}),
+    ...(ask ? { ask } : {}),
+  };
+}
+
+/** Validate a stored questionnaire so a reload keeps the card and its answers. */
+function sanitizeAsk(raw: unknown): AskBlock | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as Record<string, unknown>;
+  const questions = parseQuestions({ questions: record["questions"] });
+  if (questions.length === 0) return undefined;
+
+  const answers: AskAnswers = {};
+  if (record["answers"] && typeof record["answers"] === "object") {
+    for (const [key, value] of Object.entries(record["answers"] as Record<string, unknown>)) {
+      if (!Array.isArray(value)) continue;
+      const picked = value
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .slice(0, 8);
+      if (picked.length > 0) answers[key] = picked;
+    }
+  }
+  return {
+    questions,
+    ...(Object.keys(answers).length > 0 ? { answers } : {}),
   };
 }
 

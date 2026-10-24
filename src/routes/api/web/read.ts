@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { jsonResponse } from "@/server/garmin.server";
+import { checkWebBudget } from "@/server/web-budget.server";
 import { readPage, webConfigured, webSetupHint } from "@/server/web.server";
 
 type ReadBody = { url?: unknown };
@@ -21,6 +22,13 @@ export const Route = createFileRoute("/api/web/read")({
         const raw = typeof body.url === "string" ? body.url.trim() : "";
         if (!/^https?:\/\//i.test(raw)) {
           return jsonResponse({ error: "A valid http(s) URL is required." }, 400);
+        }
+
+        const limited = checkWebBudget(request);
+        if (limited) {
+          return jsonResponse({ error: limited.message }, 429, [], {
+            "retry-after": String(Math.ceil(limited.retryAfterMs / 1000)),
+          });
         }
 
         try {

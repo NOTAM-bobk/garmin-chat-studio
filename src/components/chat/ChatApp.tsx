@@ -60,6 +60,8 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { parseChartSpec } from "@/lib/chart";
 import {
+  TOOL_CAP,
+  coreTools,
   describeTool,
   formatBytes,
   toolSpecs,
@@ -96,6 +98,7 @@ import {
 } from "@/lib/modes";
 import { APP_VERSION, BUILDER } from "@/lib/app-meta";
 import { prepareImage } from "@/lib/image";
+import { discoverySpec, isDiscoveryTool, matchesText, matchTools } from "@/lib/tool-catalog";
 import {
   MEMORY_LIMIT,
   addMemory,
@@ -228,7 +231,7 @@ function systemPrompt(
   const writes =
     status?.mode === "personal"
       ? "This account is connected with a personal API key, which is read-only: you can read data but cannot create, upload or schedule workouts. Say that plainly instead of implying you did."
-      : "You may create and schedule workouts when asked. State exactly what you created.";
+      : "You can also change the account: create, upload and schedule workouts, log food, weigh-ins, hydration and gear, and edit activities. Before anything that deletes, unschedules, replaces or overwrites what already exists, say exactly what will change and wait for an explicit yes. Afterwards, state exactly what you created, changed or removed.";
 
   return `You are Garmin Chat, a training analyst with live read access to the user's Garmin Connect account through MCP tools.
 Today is ${weekday}, ${today}. ${connection}
@@ -271,6 +274,10 @@ Deep dives on activities:
 - Read inside the session, not just the totals: pace or power drift between the first and second half, heart-rate drift at constant effort, cadence, elevation, zone time, and the split where the fade started. Name the point it turned.
 - Compare the session with the user's own 7- and 30-day baseline for the same sport, then say whether it was normal, better or worse and by how much.
 - If a deeper tool is missing or errors, say which layer you could not read instead of implying the session was ordinary.
+
+Tool coverage:
+- The core Garmin readings are loaded already. Anything else in the account — gear, badges, courses, nutrition, devices, weight, blood pressure, lactate threshold, power curves, pregnancy, menstrual cycle, workout upload — needs find_garmin_tools first: call it with two or three words, then call the tool it returns on your next turn.
+- Never tell the user a metric or action is unsupported before you have searched the catalogue.
 
 Web research:
 - web_search and web_read reach the open internet for what your Garmin tools cannot answer: training science, gear specs, race rules, weather, event details, current guidance.
@@ -976,12 +983,40 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     abortRef.current = controller;
     setBusy(true);
 
-    let garminSpecs = connected ? toolSpecs(garminTools) : [];
-    if (connected && garminSpecs.length === 0) {
-      garminSpecs = toolSpecs(await refreshTools());
-    }
-    // Memory and web tools are always available; Garmin ones only while connected.
-    const tools = [...memoryTools, ...webTools, ...garminSpecs];
+    // Providers cap how many schemas a request may carry, so the core readings
+    // travel every turn and the long tail is pulled in through find_garmin_tools.
+    let available = connected ? garminTools : [];
+    if (connected && available.length === 0) available = await refreshTools();
+    const loaded = coreTools(available);
+    const baseSpecs = toolSpecs(loaded);
+    const loadedNames = new Set(loaded.map((tool) => tool.name));
+    const extraTools: GarminTool[] = [];
+    const canDiscover = available.length > loaded.length;
+
+    /** Load the schemas the model asked for, within the provider's limit. */
+    const discover = (input: Record<string, unknown>): ToolResult => {
+      const query = typeof input["query"] === "string" ? input["query"] : "";
+      const reserved =
+        memoryTools.length + webTools.length + 1 + baseSpecs.length + extraTools.length;
+      const room = Math.max(0, TOOL_CAP - reserved);
+      if (room === 0) {
+        return {
+          ok: true,
+          isError: false,
+          text: "The tool budget for this turn is full. Use the tools already loaded, or ask again next turn.",
+        };
+      }
+      const matched = matchTools(
+        query,
+        available.filter((tool) => !loadedNames.has(tool.name)),
+        room,
+      );
+      for (const tool of matched) {
+        loadedNames.add(tool.name);
+        extraTools.push(tool);
+      }
+      return { ok: true, isError: false, text: matchesText(matched, query) };
+    };
 
     // Only the prompt being answered carries its image: past pixels stay in the
     // transcript but stop costing tokens on later turns.
@@ -992,7 +1027,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         role: "system",
         content: systemPrompt(
           status,
-          garminSpecs.length,
+          available.length,
           resolveTone(tone, modes).prompt,
           withImage,
           memoriesRef.current,
@@ -1015,6 +1050,15 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
           label: round === 0 ? "Reading your question" : "Reviewing your data",
           status: "active",
         });
+
+        // Memory and web tools are always available; Garmin ones while connected.
+        const tools = [
+          ...memoryTools,
+          ...webTools,
+          ...(canDiscover ? [discoverySpec] : []),
+          ...baseSpecs,
+          ...toolSpecs(extraTools),
+        ];
 
         const turn = await runRound(history, {
           model,
@@ -1062,7 +1106,12 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
               ? describeMemoryTool(event.call.name, event.call.input)
               : isWebTool(event.call.name)
                 ? describeWebTool(event.call.name, event.call.input)
-                : describeTool(event.call.name, event.call.input);
+                : isDiscoveryTool(event.call.name)
+                  ? {
+                      label: "Looking up Garmin tools",
+                      detail: String(event.call.input["query"] ?? "").slice(0, 60),
+                    }
+                  : describeTool(event.call.name, event.call.input);
             addStep({
               id: `tool-${event.call.id}`,
               kind: "tool",
@@ -1090,11 +1139,14 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
           const startedAt = performance.now();
           try {
             const local = isMemoryTool(call.name);
+            const discovery = isDiscoveryTool(call.name);
             const result = local
               ? handleMemoryTool(call.name, call.input)
               : isWebTool(call.name)
                 ? await requestWebTool(call.name, call.input)
-                : await requestTool(call.name, call.input);
+                : discovery
+                  ? discover(call.input)
+                  : await requestTool(call.name, call.input);
             history.push({ role: "tool", tool_call_id: call.id, content: result.text });
             patchStep(stepId, {
               status: result.ok ? "done" : "error",
@@ -1103,7 +1155,11 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
                 ? result.ok
                   ? "saved in this browser"
                   : "memory not changed"
-                : `${formatBytes(result.text)} · ${result.ok ? "loaded" : "tool reported an error"}`,
+                : discovery
+                  ? extraTools.length > 0
+                    ? `${extraTools.length} Garmin tools now loaded`
+                    : "no matching tool"
+                  : `${formatBytes(result.text)} · ${result.ok ? "loaded" : "tool reported an error"}`,
             });
           } catch (caught) {
             const message = errorText(caught);
@@ -1828,7 +1884,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
             </h1>
             <p className="mt-2 max-w-md text-center text-[13.5px] leading-relaxed text-muted-foreground">
               {connected
-                ? `${toolsAvailable} Garmin tools are live. Sleep, recovery, load and workouts — read as we go. Attach a screenshot with +.`
+                ? `${toolsAvailable} Garmin tools are live. Sleep, recovery, load, workouts and the rest of your account — read as we go. Attach a screenshot with +.`
                 : "Connect Garmin to read your sleep, recovery and workouts inside the chat — or attach a screenshot with +."}
             </p>
 

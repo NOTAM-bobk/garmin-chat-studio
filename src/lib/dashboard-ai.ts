@@ -14,7 +14,7 @@
 
 import type { ChartType } from "@/lib/chart";
 import { uid } from "@/lib/chat";
-import { WRITE_TOOLS, type GarminTool } from "@/lib/garmin";
+import { isReadTool, type GarminTool } from "@/lib/garmin";
 import { CURATED_MODELS } from "@/lib/models";
 import { ensureGuest, loadPuter, responseText } from "@/lib/puter";
 
@@ -162,7 +162,7 @@ function toolLine(tool: GarminTool): string {
 
 function toolCatalogue(tools: GarminTool[]): string {
   return tools
-    .filter((tool) => !WRITE_TOOLS.has(tool.name))
+    .filter((tool) => isReadTool(tool.name))
     .map(toolLine)
     .join("\n");
 }
@@ -347,7 +347,7 @@ export function parsePlan(
     if (!isRecord(entry)) continue;
     const name = typeof entry["tool"] === "string" ? entry["tool"] : "";
     const tool = byName.get(name);
-    if (!tool || WRITE_TOOLS.has(tool.name)) continue;
+    if (!tool || !isReadTool(tool.name)) continue;
     const given = isRecord(entry["args"]) ? entry["args"] : {};
     const args = fillArguments(tool, given, now);
     if (!args) continue;
@@ -418,7 +418,7 @@ export function fallbackPlan(tools: GarminTool[], now = new Date()): DashboardPl
   // Plenty of accounts (personal API keys especially) miss half the list above.
   for (const tool of tools) {
     if (gadgets.length >= 5) break;
-    if (used.has(tool.name) || WRITE_TOOLS.has(tool.name)) continue;
+    if (used.has(tool.name) || !isReadTool(tool.name)) continue;
     add(tool, titleFor(tool.name), "list", "sm");
   }
 

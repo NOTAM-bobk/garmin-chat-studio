@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { jsonResponse } from "@/server/garmin.server";
+import { logPostHog } from "@/server/posthog-logs.server";
 import { checkWebBudget } from "@/server/web-budget.server";
 import { searchWeb, webConfigured, webSetupHint } from "@/server/web.server";
 
@@ -37,10 +38,16 @@ export const Route = createFileRoute("/api/web/search")({
         }
 
         try {
-          const { sources } = await searchWeb(query.slice(0, 400), numResults);
+          const { sources, providers } = await searchWeb(query.slice(0, 400), numResults);
+          logPostHog("info", "web research search completed", {
+            operation: "search",
+            provider_count: providers.length,
+            result_count: sources.length,
+          });
           return jsonResponse({ sources });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Web search failed.";
+          logPostHog("error", "web research search failed", { operation: "search" });
           console.error("[exa] search failed:", message);
           return jsonResponse({ error: message }, 502);
         }

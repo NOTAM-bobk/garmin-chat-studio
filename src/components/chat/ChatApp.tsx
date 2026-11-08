@@ -42,6 +42,7 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from "sonner";
+import { usePostHog } from "posthog-js/react";
 
 import { AgentTrace } from "@/components/chat/AgentTrace";
 import { ChatChart } from "@/components/chat/ChatChart";
@@ -129,6 +130,8 @@ import {
 import { thoughtPlan } from "@/lib/thoughts";
 import { cn } from "@/lib/utils";
 import {
+  captureAiToolSpan,
+  createAiTraceId,
   listPuterModels,
   loadPuter,
   nameChat,
@@ -136,6 +139,7 @@ import {
   runRound,
   suggestFollowups,
   type AgentMessage,
+  type AiTraceContext,
   type TurnEvent,
   type TurnResult,
 } from "@/lib/puter";
@@ -381,6 +385,7 @@ function errorText(error: unknown): string {
 }
 
 export function ChatApp({ initialChatId = null }: { initialChatId?: string | null } = {}) {
+  const posthog = usePostHog();
   const [chats, setChats] = useState<Chat[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -417,6 +422,8 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
   const [memories, setMemories] = useState<Memory[]>([]);
 
   const memoriesRef = useRef<Memory[]>([]);
+  /** Avoid duplicate identity calls while retaining account-switch protection. */
+  const identifiedAccountIdRef = useRef<string | null>(null);
   /** Slug from the address bar, used for the first message in a shared chat. */
   const pendingChatRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -546,6 +553,17 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
       cancelled = true;
     };
   }, []);
+
+  // Identify after a real Puter account is restored or signs in. The UUID is stable;
+  // username is a mutable person property and never an event property.
+  useEffect(() => {
+    if (!account?.signedIn || account.guest || !account.id) return;
+    if (identifiedAccountIdRef.current === account.id) return;
+
+    if (identifiedAccountIdRef.current) posthog.reset();
+    posthog.identify(account.id, account.username ? { username: account.username } : undefined);
+    identifiedAccountIdRef.current = account.id;
+  }, [account, posthog]);
 
   // Mirror every change to the user's Puter KV store, debounced past streaming.
   useEffect(() => {
@@ -769,13 +787,21 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
   }
 
   /** Let the model write a short thread title from the conversation so far. */
-  async function titleChat(chat: Pick<Chat, "id" | "messages">, notify: boolean) {
+  async function titleChat(
+    chat: Pick<Chat, "id" | "messages">,
+    notify: boolean,
+    ai: AiTraceContext = {
+      sessionId: chat.id,
+      traceId: createAiTraceId(),
+      capture: (event, properties) => posthog.capture(event, properties),
+    },
+  ) {
     const seed = chat.messages
       .filter((message) => message.content.trim())
       .map((message) => ({ role: message.role, content: message.content }));
     if (seed.length === 0) return;
     try {
-      const title = await nameChat(seed, model);
+      const title = await nameChat(seed, model, ai);
       if (!title) throw new Error("No title returned");
       setChats((previous) =>
         previous.map((entry) => (entry.id === chat.id ? { ...entry, title } : entry)),
@@ -810,6 +836,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     setModes(list);
     saveModes(list);
     chooseTone(modeToneId(mode.id));
+    posthog.capture("custom_mode_created");
     toast("Mode created", { description: `${mode.name} is now the active mode.` });
   }
 
@@ -879,6 +906,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
       });
       return;
     }
+    posthog.capture("garmin_connection_started", { connection_method: "mcp" });
     window.location.assign("/api/garmin/connect");
   }
 
@@ -922,6 +950,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     setStatus((previous) =>
       previous ? { ...previous, connected: false, available: 0 } : previous,
     );
+    posthog.capture("garmin_disconnected");
     toast("Garmin disconnected", { description: "Your token cookie has been cleared." });
   }
 
@@ -994,6 +1023,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         const remote = await loadCloudChats();
         if (remote.length > 0) setChats((previous) => mergeChats(previous, remote));
         setSyncState("saved");
+        posthog.capture("cloud_sync_enabled");
         toast("Chats now sync with your Puter account", {
           description:
             "Text history is saved across devices. Attached images stay in this browser.",
@@ -1013,6 +1043,8 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
   }
 
   async function stopCloudSync() {
+    posthog.reset();
+    identifiedAccountIdRef.current = null;
     try {
       await signOutOfPuter();
     } catch {
@@ -1054,8 +1086,9 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     assistantId: string;
     /** History up to and including the user message being answered. */
     prior: Message[];
+    ai: AiTraceContext;
   }): Promise<string> {
-    const { chatId, assistantId, prior } = args;
+    const { chatId, assistantId, prior, ai } = args;
     let streamed = "";
 
     const patchMessage = (patch: (message: Message) => Message) => {
@@ -1281,6 +1314,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
           runRound(history, {
             model: candidate,
             signal: controller.signal,
+            ai,
             ...(tools.length > 0 && round < MAX_TOOL_ROUNDS - 1 ? { tools } : {}),
             onEvent: (event) => {
               progress.events += 1;
@@ -1336,6 +1370,13 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
             const local = isMemoryTool(call.name);
             const discovery = isDiscoveryTool(call.name);
             const result = await runToolCall(call.name, call.input);
+            captureAiToolSpan(ai, {
+              parentId: turn.aiSpanId,
+              name: call.name,
+              input: call.input,
+              output: { ok: result.ok, is_error: result.isError, text: result.text },
+              latencyMs: performance.now() - startedAt,
+            });
             history.push({ role: "tool", tool_call_id: call.id, content: result.text });
             patchStep(stepId, {
               status: result.ok ? "done" : "error",
@@ -1353,6 +1394,13 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
                     : `${formatBytes(result.text)} · ${result.ok ? "loaded" : "tool reported an error"}`,
             });
           } catch (caught) {
+            captureAiToolSpan(ai, {
+              parentId: turn.aiSpanId,
+              name: call.name,
+              input: call.input,
+              latencyMs: performance.now() - startedAt,
+              error: caught,
+            });
             const message = errorText(caught);
             history.push({
               role: "tool",
@@ -1397,6 +1445,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
             {
               model: activeModel,
               signal: controller.signal,
+              ai,
               onEvent: (event) => {
                 if (event.type === "text") appendText(event.text);
               },
@@ -1492,6 +1541,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
           { role: "assistant", content: streamed },
         ],
         activeModel,
+        ai,
       );
       if (followups.length > 0) {
         patchMessage((message) => ({ ...message, followups }));
@@ -1535,6 +1585,14 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
       ...(attached ? { image: attached } : {}),
       steps: [],
     };
+    posthog.capture("chat_message_sent", {
+      has_image: Boolean(attached),
+      conversation_state: activeChat ? "existing" : "new",
+      model,
+      tone,
+      garmin_connected: connected,
+    });
+
     const assistantId = uid();
     const assistantMessage: Message = {
       id: assistantId,
@@ -1545,6 +1603,11 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
 
     const prior = [...(activeChat?.messages ?? []), userMessage];
     const chatId = activeChat?.id ?? pendingChatRef.current ?? uid();
+    const ai: AiTraceContext = {
+      sessionId: chatId,
+      traceId: createAiTraceId(),
+      capture: (event, properties) => posthog.capture(event, properties),
+    };
     pendingChatRef.current = chatId;
 
     if (activeChat) {
@@ -1568,13 +1631,20 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
       setActiveId(chatId);
     }
 
-    const reply = await runTurn({ chatId, assistantId, prior });
+    const reply = await runTurn({ chatId, assistantId, prior, ai });
+    if (reply.trim()) {
+      posthog.capture("chat_response_completed", {
+        has_image: Boolean(attached),
+        garmin_connected: connected,
+      });
+    }
 
     // The first answer names the thread, so the sidebar reads like topics.
     if (!activeChat) {
       void titleChat(
         { id: chatId, messages: [...prior, { ...assistantMessage, content: reply }] },
         false,
+        ai,
       );
     }
   }
@@ -1618,6 +1688,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     if (prior[prior.length - 1]?.role !== "user") return;
 
     const assistantId = uid();
+    posthog.capture("chat_response_regenerated");
     setError(null);
     stickRef.current = true;
     setChats((previous) =>
@@ -1632,7 +1703,12 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
       ),
     );
 
-    await runTurn({ chatId, assistantId, prior });
+    const ai: AiTraceContext = {
+      sessionId: chatId,
+      traceId: createAiTraceId(),
+      capture: (event, properties) => posthog.capture(event, properties),
+    };
+    await runTurn({ chatId, assistantId, prior, ai });
   }
 
   async function editMessage(chatId: string, messageId: string, text: string) {
@@ -1647,6 +1723,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     const edited: Message = { ...target, content: next };
     const prior = [...chat.messages.slice(0, index), edited];
     const assistantId = uid();
+    posthog.capture("chat_prompt_edited");
     setError(null);
     stickRef.current = true;
     setChats((previous) =>
@@ -1661,10 +1738,21 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
       ),
     );
 
-    await runTurn({ chatId, assistantId, prior });
+    const ai: AiTraceContext = {
+      sessionId: chatId,
+      traceId: createAiTraceId(),
+      capture: (event, properties) => posthog.capture(event, properties),
+    };
+    await runTurn({ chatId, assistantId, prior, ai });
   }
 
   function setFeedback(chatId: string, messageId: string, value: "up" | "down") {
+    const message = chats
+      .find((chat) => chat.id === chatId)
+      ?.messages.find((entry) => entry.id === messageId);
+    posthog.capture("chat_response_rated", {
+      rating: message?.feedback === value ? "cleared" : value,
+    });
     setChats((previous) =>
       previous.map((chat) =>
         chat.id !== chatId

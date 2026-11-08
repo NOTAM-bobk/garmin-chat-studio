@@ -21,14 +21,17 @@ export type PuterAccount = {
   signedIn: boolean;
   /** Temporary (guest) accounts lose their cloud data, so we don't sync them. */
   guest: boolean;
+  /** Puter's immutable account UUID, used as the analytics distinct ID. */
+  id: string | null;
   username: string | null;
 };
 
-export const SIGNED_OUT: PuterAccount = { signedIn: false, guest: false, username: null };
+export const SIGNED_OUT: PuterAccount = { signedIn: false, guest: false, id: null, username: null };
 
-function readUser(raw: unknown): { username: string | null; isTemp: boolean } {
+function readUser(raw: unknown): { id: string | null; username: string | null; isTemp: boolean } {
   const record = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {
+    id: typeof record["uuid"] === "string" ? record["uuid"] : null,
     username: typeof record["username"] === "string" ? record["username"] : null,
     isTemp: record["is_temp"] !== false,
   };
@@ -39,10 +42,10 @@ export async function readPuterAccount(): Promise<PuterAccount> {
   if (!puter.auth.isSignedIn()) return SIGNED_OUT;
   try {
     const user = readUser(await puter.auth.getUser());
-    return { signedIn: true, guest: user.isTemp, username: user.username };
+    return { signedIn: true, guest: user.isTemp, id: user.id, username: user.username };
   } catch {
     // A session exists but we can't identify it: treat it as temporary.
-    return { signedIn: true, guest: true, username: null };
+    return { signedIn: true, guest: true, id: null, username: null };
   }
 }
 

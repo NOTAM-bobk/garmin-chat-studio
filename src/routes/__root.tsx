@@ -155,8 +155,8 @@ function RootShell({ children }: { children: ReactNode }) {
 }
 
 function PostHogRoot({ children }: { children: ReactNode }) {
-  const apiKey = import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN;
-  const apiHost = import.meta.env.VITE_PUBLIC_POSTHOG_HOST;
+  const apiKey = import.meta.env["VITE_PUBLIC_POSTHOG_PROJECT_TOKEN"];
+  const apiHost = import.meta.env["VITE_PUBLIC_POSTHOG_HOST"];
 
   if (!apiKey || !apiHost) {
     if (typeof window !== "undefined" && import.meta.env.DEV) {
@@ -177,8 +177,6 @@ function PostHogRoot({ children }: { children: ReactNode }) {
       options={{
         api_host: apiHost,
         capture_exceptions: true,
-        // AI Observability keeps prompt and completion content unless this is enabled.
-        privacyMode: false,
         defaults: "2025-05-24",
         debug: import.meta.env.DEV,
         // Stitch browser and TanStack Start API activity to the same person/session.

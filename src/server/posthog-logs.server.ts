@@ -27,15 +27,15 @@ function createPostHogLogger() {
 
   const provider = new LoggerProvider({
     resource: resourceFromAttributes({ "service.name": "garmin-chat-studio" }),
-  });
-  provider.addLogRecordProcessor(
-    new BatchLogRecordProcessor(
-      new OTLPLogExporter({
-        url: `${host.replace(/\/+$/, "")}/i/v1/logs`,
-        headers: { Authorization: `Bearer ${projectToken}` },
+    processors: [
+      new BatchLogRecordProcessor({
+        exporter: new OTLPLogExporter({
+          url: `${host.replace(/\/+$/, "")}/i/v1/logs`,
+          headers: { Authorization: `Bearer ${projectToken}` },
+        }),
       }),
-    ),
-  );
+    ],
+  });
 
   return provider.getLogger("garmin-chat-studio.posthog");
 }

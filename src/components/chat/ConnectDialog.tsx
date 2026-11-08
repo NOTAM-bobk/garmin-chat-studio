@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { usePostHog } from "posthog-js/react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -41,6 +42,7 @@ export function ConnectDialog({
   onMcp: () => void;
   onConnected: () => void;
 }) {
+  const posthog = usePostHog();
   const [view, setView] = useState<"choice" | "key">("choice");
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -72,6 +74,7 @@ export function ConnectDialog({
       }
       haptic("done");
       setKey("");
+      posthog.capture("garmin_connected", { connection_method: "personal_api_key" });
       onConnected();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Couldn't reach the server.");

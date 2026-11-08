@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { jsonResponse } from "@/server/garmin.server";
+import { logPostHog } from "@/server/posthog-logs.server";
 import { checkWebBudget } from "@/server/web-budget.server";
 import { readPage, webConfigured, webSetupHint } from "@/server/web.server";
 
@@ -34,11 +35,14 @@ export const Route = createFileRoute("/api/web/read")({
         try {
           const source = await readPage(raw);
           if (!source) {
+            logPostHog("warn", "web research page unavailable", { operation: "read" });
             return jsonResponse({ error: "That page couldn't be read." }, 404);
           }
+          logPostHog("info", "web research page read", { operation: "read" });
           return jsonResponse({ source });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Could not read that page.";
+          logPostHog("error", "web research page read failed", { operation: "read" });
           console.error("[exa] read failed:", message);
           return jsonResponse({ error: message }, 502);
         }

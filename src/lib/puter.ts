@@ -155,6 +155,15 @@ export type TurnResult = {
   toolCalls: { id: string; name: string; input: Record<string, unknown> }[];
   reasoningDetails: unknown[];
   assistant: AgentMessage;
+  aiSpanId: string;
+};
+
+export type AiCaptureEvent = "$ai_generation" | "$ai_span";
+
+export type AiTraceContext = {
+  sessionId: string;
+  traceId: string;
+  capture: (event: AiCaptureEvent, properties: Record<string, unknown>) => void;
 };
 
 function stringField(value: unknown): string {
@@ -180,6 +189,97 @@ export function responseText(raw: unknown): string {
   return stringField(record["text"]);
 }
 
+export function createAiTraceId(): string {
+  return `ai-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function aiError(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : "Puter AI request failed.";
+}
+
+function captureAi(
+  context: AiTraceContext,
+  event: AiCaptureEvent,
+  properties: Record<string, unknown>,
+): void {
+  try {
+    context.capture(event, properties);
+  } catch {
+    // Observability must never affect the model request or its UI.
+  }
+}
+
+function aiContent(content: AgentMessage["content"]): unknown {
+  return content ?? "";
+}
+
+function aiMessage(message: AgentMessage): Record<string, unknown> {
+  return {
+    role: message.role,
+    content: aiContent(message.content),
+    ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
+    ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
+  };
+}
+
+export function captureAiGeneration(
+  context: AiTraceContext,
+  details: {
+    spanId: string;
+    spanName: string;
+    model: string;
+    input: AgentMessage[];
+    output?: AgentMessage;
+    stream: boolean;
+    latencyMs: number;
+    firstTokenMs?: number;
+    tools?: ToolSpec[];
+    error?: unknown;
+  },
+): void {
+  captureAi(context, "$ai_generation", {
+    $ai_trace_id: context.traceId,
+    $ai_session_id: context.sessionId,
+    $ai_span_id: details.spanId,
+    $ai_span_name: details.spanName,
+    $ai_model: details.model,
+    $ai_provider: "puter",
+    $ai_input: details.input.map(aiMessage),
+    ...(details.output ? { $ai_output_choices: [aiMessage(details.output)] } : {}),
+    $ai_latency: details.latencyMs / 1000,
+    $ai_stream: details.stream,
+    ...(details.firstTokenMs !== undefined
+      ? { $ai_time_to_first_token: details.firstTokenMs / 1000 }
+      : {}),
+    ...(details.tools && details.tools.length > 0 ? { $ai_tools: details.tools } : {}),
+    ...(details.error ? { $ai_is_error: true, $ai_error: aiError(details.error) } : {}),
+  });
+}
+
+export function captureAiToolSpan(
+  context: AiTraceContext,
+  details: {
+    parentId: string;
+    name: string;
+    input: Record<string, unknown>;
+    output?: unknown;
+    latencyMs: number;
+    error?: unknown;
+  },
+): void {
+  captureAi(context, "$ai_span", {
+    $ai_trace_id: context.traceId,
+    $ai_session_id: context.sessionId,
+    $ai_span_id: createAiTraceId(),
+    $ai_parent_id: details.parentId,
+    $ai_span_name: details.name,
+    $ai_input_state: details.input,
+    ...(details.output !== undefined ? { $ai_output_state: details.output } : {}),
+    $ai_latency: details.latencyMs / 1000,
+    ...(details.error ? { $ai_is_error: true, $ai_error: aiError(details.error) } : {}),
+  });
+}
+
 /** Tidy a model-written title: one line, no quotes or trailing punctuation, capped. */
 export function cleanTitle(raw: string): string {
   const line = raw
@@ -203,6 +303,7 @@ export function cleanTitle(raw: string): string {
 export async function nameChat(
   messages: { role: string; content: string }[],
   model: string,
+  ai: AiTraceContext,
 ): Promise<string> {
   const transcript = messages
     .slice(0, 4)
@@ -210,22 +311,43 @@ export async function nameChat(
     .join("\n\n");
   if (!transcript.trim()) return "";
 
-  const puter = await loadPuter();
-  await ensureGuest(puter);
-
-  const raw = await puter.ai.chat(
-    [
-      {
-        role: "system",
-        content:
-          "You name chat threads. Reply with the title only: 2-5 words, no quotes, no trailing punctuation, at most 48 characters. Name the topic (what the chat is about), not the fact that it is a chat.",
-      },
-      { role: "user", content: transcript },
-    ],
-    { model, stream: false },
-  );
-
-  return cleanTitle(responseText(raw));
+  const input: AgentMessage[] = [
+    {
+      role: "system",
+      content:
+        "You name chat threads. Reply with the title only: 2-5 words, no quotes, no trailing punctuation, at most 48 characters. Name the topic (what the chat is about), not the fact that it is a chat.",
+    },
+    { role: "user", content: transcript },
+  ];
+  const spanId = createAiTraceId();
+  const startedAt = performance.now();
+  try {
+    const puter = await loadPuter();
+    await ensureGuest(puter);
+    const raw = await puter.ai.chat(input, { model, stream: false });
+    const title = cleanTitle(responseText(raw));
+    captureAiGeneration(ai, {
+      spanId,
+      spanName: "chat_title",
+      model,
+      input,
+      output: { role: "assistant", content: title },
+      stream: false,
+      latencyMs: performance.now() - startedAt,
+    });
+    return title;
+  } catch (error) {
+    captureAiGeneration(ai, {
+      spanId,
+      spanName: "chat_title",
+      model,
+      input,
+      stream: false,
+      latencyMs: performance.now() - startedAt,
+      error,
+    });
+    throw error;
+  }
 }
 
 /** Tidy one suggested question: single line, no bullets/numbering/quotes. */
@@ -285,6 +407,7 @@ export function parseFollowups(raw: string): string[] {
 export async function suggestFollowups(
   messages: { role: string; content: string }[],
   model: string,
+  ai: AiTraceContext,
 ): Promise<string[]> {
   const transcript = messages
     .slice(-6)
@@ -292,24 +415,41 @@ export async function suggestFollowups(
     .join("\n\n");
   if (!transcript.trim()) return [];
 
+  const input: AgentMessage[] = [
+    {
+      role: "system",
+      content:
+        'You write the two follow-up questions a user would most likely ask next in a chat about their Garmin training data. Reply with a JSON array of exactly two short questions and nothing else, for example ["How does that compare with last month?", "What should I change tomorrow?"]. Ground each question in the conversation, keep it under 70 characters, and do not repeat a question already answered.',
+    },
+    { role: "user", content: transcript },
+  ];
+  const spanId = createAiTraceId();
+  const startedAt = performance.now();
   try {
     const puter = await loadPuter();
     await ensureGuest(puter);
-
-    const raw = await puter.ai.chat(
-      [
-        {
-          role: "system",
-          content:
-            'You write the two follow-up questions a user would most likely ask next in a chat about their Garmin training data. Reply with a JSON array of exactly two short questions and nothing else, for example ["How does that compare with last month?", "What should I change tomorrow?"]. Ground each question in the conversation, keep it under 70 characters, and do not repeat a question already answered.',
-        },
-        { role: "user", content: transcript },
-      ],
-      { model, stream: false },
-    );
-
-    return parseFollowups(responseText(raw));
-  } catch {
+    const raw = await puter.ai.chat(input, { model, stream: false });
+    const followups = parseFollowups(responseText(raw));
+    captureAiGeneration(ai, {
+      spanId,
+      spanName: "chat_followups",
+      model,
+      input,
+      output: { role: "assistant", content: JSON.stringify(followups) },
+      stream: false,
+      latencyMs: performance.now() - startedAt,
+    });
+    return followups;
+  } catch (error) {
+    captureAiGeneration(ai, {
+      spanId,
+      spanName: "chat_followups",
+      model,
+      input,
+      stream: false,
+      latencyMs: performance.now() - startedAt,
+      error,
+    });
     return [];
   }
 }
@@ -321,128 +461,168 @@ export async function runRound(
     model: string;
     signal: AbortSignal;
     tools?: ToolSpec[];
+    ai: AiTraceContext;
     onEvent: (event: TurnEvent) => void;
   },
 ): Promise<TurnResult> {
-  const puter = await loadPuter();
-  await ensureGuest(puter);
-
-  const request: Record<string, unknown> = {
-    model: options.model,
-    stream: true,
-    signal: options.signal,
-    normalize: true,
-  };
-  if (options.tools && options.tools.length > 0) request["tools"] = options.tools;
-
-  const raw = await puter.ai.chat(messages, request);
-  let text = "";
-  let reasoning = "";
-  const toolCalls: TurnResult["toolCalls"] = [];
-  const reasoningDetails: unknown[] = [];
-
-  const handleChunk = (chunk: Chunk) => {
-    const type = chunk.type;
-    if (type === "text") {
-      const piece = stringField(chunk.text);
-      if (piece) {
-        text += piece;
-        options.onEvent({ type: "text", text: piece });
-      }
-      return;
-    }
-    if (type === "reasoning") {
-      const piece =
-        stringField(chunk.reasoning) || stringField(chunk.text) || stringField(chunk.delta);
-      if (piece) {
-        reasoning += piece;
-        options.onEvent({ type: "reasoning", text: piece });
-      }
-      return;
-    }
-    if (type === "reasoning_detail" && chunk.detail) {
-      reasoningDetails.push(chunk.detail);
-      return;
-    }
-    if (type === "tool_use" || type === "tool_call") {
-      const name = typeof chunk.name === "string" ? chunk.name : "";
-      if (!name) return;
-      const input =
-        chunk.input && typeof chunk.input === "object"
-          ? (chunk.input as Record<string, unknown>)
-          : {};
-      const id =
-        typeof chunk.id === "string" ? chunk.id : `call_${Math.random().toString(36).slice(2, 10)}`;
-      const call = { id, name, input };
-      toolCalls.push(call);
-      options.onEvent({ type: "tool", call });
-      return;
-    }
-    if (type === "error") {
-      const message =
-        typeof chunk.message === "string" ? chunk.message : "The model stopped unexpectedly.";
-      throw new Error(message);
-    }
-    // Some providers only send { text } for plain chunks.
-    if (typeof chunk.text === "string" && chunk.text) {
-      text += chunk.text;
-      options.onEvent({ type: "text", text: chunk.text });
-    }
+  const spanId = createAiTraceId();
+  const startedAt = performance.now();
+  let firstTokenMs: number | undefined;
+  const markFirstToken = () => {
+    if (firstTokenMs === undefined) firstTokenMs = performance.now() - startedAt;
   };
 
-  if (raw && typeof raw === "object" && Symbol.asyncIterator in raw) {
-    for await (const part of raw as AsyncIterable<Chunk>) {
-      if (options.signal.aborted) break;
-      handleChunk(part);
-    }
-  } else {
-    const message = (raw as { message?: Record<string, unknown> } | null)?.message;
-    if (message) {
-      const content = stringField(message["content"]);
-      if (content) {
-        text += content;
-        options.onEvent({ type: "text", text: content });
-      }
-      const reasoningText = stringField(message["reasoning"]);
-      if (reasoningText) {
-        reasoning += reasoningText;
-        options.onEvent({ type: "reasoning", text: reasoningText });
-      }
-      const details = message["reasoning_details"];
-      if (Array.isArray(details)) reasoningDetails.push(...details);
-      const list = Array.isArray(message["tool_calls"]) ? message["tool_calls"] : [];
-      for (const entry of list) {
-        const record = entry as Record<string, unknown>;
-        const fn = (record["function"] ?? {}) as Record<string, unknown>;
-        const name = typeof fn["name"] === "string" ? fn["name"] : "";
-        if (!name) continue;
-        let input: Record<string, unknown> = {};
-        try {
-          const parsed = JSON.parse(String(fn["arguments"] ?? "{}")) as unknown;
-          if (parsed && typeof parsed === "object") input = parsed as Record<string, unknown>;
-        } catch {
-          input = {};
+  try {
+    const puter = await loadPuter();
+    await ensureGuest(puter);
+
+    const request: Record<string, unknown> = {
+      model: options.model,
+      stream: true,
+      signal: options.signal,
+      normalize: true,
+    };
+    if (options.tools && options.tools.length > 0) request["tools"] = options.tools;
+
+    const raw = await puter.ai.chat(messages, request);
+    let text = "";
+    let reasoning = "";
+    const toolCalls: TurnResult["toolCalls"] = [];
+    const reasoningDetails: unknown[] = [];
+
+    const handleChunk = (chunk: Chunk) => {
+      const type = chunk.type;
+      if (type === "text") {
+        const piece = stringField(chunk.text);
+        if (piece) {
+          markFirstToken();
+          text += piece;
+          options.onEvent({ type: "text", text: piece });
         }
+        return;
+      }
+      if (type === "reasoning") {
+        const piece =
+          stringField(chunk.reasoning) || stringField(chunk.text) || stringField(chunk.delta);
+        if (piece) {
+          markFirstToken();
+          reasoning += piece;
+          options.onEvent({ type: "reasoning", text: piece });
+        }
+        return;
+      }
+      if (type === "reasoning_detail" && chunk.detail) {
+        reasoningDetails.push(chunk.detail);
+        return;
+      }
+      if (type === "tool_use" || type === "tool_call") {
+        const name = typeof chunk.name === "string" ? chunk.name : "";
+        if (!name) return;
+        const input =
+          chunk.input && typeof chunk.input === "object"
+            ? (chunk.input as Record<string, unknown>)
+            : {};
         const id =
-          typeof record["id"] === "string"
-            ? record["id"]
-            : `call_${Math.random().toString(36).slice(2, 10)}`;
+          typeof chunk.id === "string" ? chunk.id : `call_${Math.random().toString(36).slice(2, 10)}`;
         const call = { id, name, input };
         toolCalls.push(call);
         options.onEvent({ type: "tool", call });
+        return;
+      }
+      if (type === "error") {
+        const message =
+          typeof chunk.message === "string" ? chunk.message : "The model stopped unexpectedly.";
+        throw new Error(message);
+      }
+      // Some providers only send { text } for plain chunks.
+      if (typeof chunk.text === "string" && chunk.text) {
+        markFirstToken();
+        text += chunk.text;
+        options.onEvent({ type: "text", text: chunk.text });
+      }
+    };
+
+    if (raw && typeof raw === "object" && Symbol.asyncIterator in raw) {
+      for await (const part of raw as AsyncIterable<Chunk>) {
+        if (options.signal.aborted) break;
+        handleChunk(part);
+      }
+    } else {
+      const message = (raw as { message?: Record<string, unknown> } | null)?.message;
+      if (message) {
+        const content = stringField(message["content"]);
+        if (content) {
+          markFirstToken();
+          text += content;
+          options.onEvent({ type: "text", text: content });
+        }
+        const reasoningText = stringField(message["reasoning"]);
+        if (reasoningText) {
+          markFirstToken();
+          reasoning += reasoningText;
+          options.onEvent({ type: "reasoning", text: reasoningText });
+        }
+        const details = message["reasoning_details"];
+        if (Array.isArray(details)) reasoningDetails.push(...details);
+        const list = Array.isArray(message["tool_calls"]) ? message["tool_calls"] : [];
+        for (const entry of list) {
+          const record = entry as Record<string, unknown>;
+          const fn = (record["function"] ?? {}) as Record<string, unknown>;
+          const name = typeof fn["name"] === "string" ? fn["name"] : "";
+          if (!name) continue;
+          let input: Record<string, unknown> = {};
+          try {
+            const parsed = JSON.parse(String(fn["arguments"] ?? "{}")) as unknown;
+            if (parsed && typeof parsed === "object") input = parsed as Record<string, unknown>;
+          } catch {
+            input = {};
+          }
+          const id =
+            typeof record["id"] === "string"
+              ? record["id"]
+              : `call_${Math.random().toString(36).slice(2, 10)}`;
+          const call = { id, name, input };
+          toolCalls.push(call);
+          options.onEvent({ type: "tool", call });
+        }
       }
     }
-  }
 
-  const assistant: AgentMessage = { role: "assistant", content: text };
-  if (toolCalls.length > 0) {
-    assistant.tool_calls = toolCalls.map((call) => ({
-      id: call.id,
-      type: "function" as const,
-      function: { name: call.name, arguments: JSON.stringify(call.input) },
-    }));
-  }
-  if (reasoningDetails.length > 0) assistant.reasoning_details = reasoningDetails;
+    const assistant: AgentMessage = { role: "assistant", content: text };
+    if (toolCalls.length > 0) {
+      assistant.tool_calls = toolCalls.map((call) => ({
+        id: call.id,
+        type: "function" as const,
+        function: { name: call.name, arguments: JSON.stringify(call.input) },
+      }));
+    }
+    if (reasoningDetails.length > 0) assistant.reasoning_details = reasoningDetails;
 
-  return { text, reasoning, toolCalls, reasoningDetails, assistant };
+    captureAiGeneration(options.ai, {
+      spanId,
+      spanName: "chat_round",
+      model: options.model,
+      input: messages,
+      output: assistant,
+      stream: true,
+      latencyMs: performance.now() - startedAt,
+      ...(firstTokenMs !== undefined ? { firstTokenMs } : {}),
+      ...(options.tools ? { tools: options.tools } : {}),
+    });
+
+    return { text, reasoning, toolCalls, reasoningDetails, assistant, aiSpanId: spanId };
+  } catch (error) {
+    captureAiGeneration(options.ai, {
+      spanId,
+      spanName: "chat_round",
+      model: options.model,
+      input: messages,
+      stream: true,
+      latencyMs: performance.now() - startedAt,
+      ...(firstTokenMs !== undefined ? { firstTokenMs } : {}),
+      ...(options.tools ? { tools: options.tools } : {}),
+      error,
+    });
+    throw error;
+  }
 }

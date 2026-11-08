@@ -16,7 +16,14 @@ import type { ChartType } from "@/lib/chart";
 import { uid } from "@/lib/chat";
 import { isReadTool, type GarminTool } from "@/lib/garmin";
 import { CURATED_MODELS } from "@/lib/models";
-import { ensureGuest, loadPuter, responseText } from "@/lib/puter";
+import {
+  captureAiGeneration,
+  createAiTraceId,
+  ensureGuest,
+  loadPuter,
+  responseText,
+  type AiTraceContext,
+} from "@/lib/puter";
 
 export type GadgetKind = "stat" | "chart" | "list";
 
@@ -570,14 +577,36 @@ export function factList(text: string, limit = 8): { rows: ReadingRow[]; raw: st
 async function askModel(
   messages: { role: "system" | "user"; content: string }[],
   model: string,
+  ai: AiTraceContext,
+  spanName: "dashboard_design" | "dashboard_insights",
 ): Promise<string | null> {
+  const spanId = createAiTraceId();
+  const startedAt = performance.now();
   try {
     const puter = await loadPuter();
     await ensureGuest(puter);
     const raw = await puter.ai.chat(messages, { model, stream: false });
     const content = responseText(raw).trim();
+    captureAiGeneration(ai, {
+      spanId,
+      spanName,
+      model,
+      input: messages,
+      output: { role: "assistant", content },
+      stream: false,
+      latencyMs: performance.now() - startedAt,
+    });
     return content || null;
-  } catch {
+  } catch (error) {
+    captureAiGeneration(ai, {
+      spanId,
+      spanName,
+      model,
+      input: messages,
+      stream: false,
+      latencyMs: performance.now() - startedAt,
+      error,
+    });
     return null;
   }
 }
@@ -585,10 +614,11 @@ async function askModel(
 /** Ask the model to lay out the dashboard. Null means "use the fallback". */
 export async function designDashboard(
   tools: GarminTool[],
+  ai: AiTraceContext,
   now = new Date(),
 ): Promise<DashboardPlan | null> {
   if (tools.length === 0) return null;
-  const raw = await askModel(designMessages(tools, now), DESIGN_MODEL);
+  const raw = await askModel(designMessages(tools, now), DESIGN_MODEL, ai, "dashboard_design");
   return raw ? parsePlan(raw, tools, now) : null;
 }
 
@@ -596,6 +626,7 @@ export async function designDashboard(
 export async function writeInsights(
   gadgets: Gadget[],
   readings: Record<string, GadgetReading>,
+  ai: AiTraceContext,
   now = new Date(),
 ): Promise<Gadget[]> {
   const filled = gadgets.filter((gadget) => {
@@ -603,6 +634,6 @@ export async function writeInsights(
     return reading && reading.state === "loaded" && reading.text.trim().length > 0;
   });
   if (filled.length === 0) return gadgets;
-  const raw = await askModel(insightMessages(filled, readings, now), DESIGN_MODEL);
+  const raw = await askModel(insightMessages(filled, readings, now), DESIGN_MODEL, ai, "dashboard_insights");
   return raw ? applyInsights(raw, gadgets) : gadgets;
 }

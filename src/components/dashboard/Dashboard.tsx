@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePostHog } from "posthog-js/react";
 import {
   ArrowLeft,
   HeartPulse,
@@ -27,6 +28,7 @@ import {
   type GadgetReading,
 } from "@/lib/dashboard-ai";
 import type { GarminStatus, GarminTool } from "@/lib/garmin";
+import { createAiTraceId, type AiTraceContext } from "@/lib/puter";
 import { haptic } from "@/lib/haptics";
 import { cn } from "@/lib/utils";
 
@@ -44,6 +46,7 @@ function clock(timestamp: number): string {
  * page instead of an empty one.
  */
 export function Dashboard() {
+  const posthog = usePostHog();
   const [status, setStatus] = useState<GarminStatus | null>(null);
   const [tools, setTools] = useState<GarminTool[]>([]);
   const [plan, setPlan] = useState<DashboardPlan | null>(null);
@@ -57,6 +60,16 @@ export function Dashboard() {
 
   const planRef = useRef<DashboardPlan | null>(null);
   const aliveRef = useRef(true);
+  const dashboardSessionIdRef = useRef(`dashboard-${createAiTraceId()}`);
+
+  const createAiTrace = useCallback(
+    (): AiTraceContext => ({
+      sessionId: dashboardSessionIdRef.current,
+      traceId: createAiTraceId(),
+      capture: (event, properties) => posthog.capture(event, properties),
+    }),
+    [posthog],
+  );
 
   useEffect(() => {
     aliveRef.current = true;
@@ -116,13 +129,13 @@ export function Dashboard() {
 
   /** Show a plan, load its readings, then let the model annotate them. */
   const applyPlan = useCallback(
-    async (next: DashboardPlan) => {
+    async (next: DashboardPlan, ai: AiTraceContext) => {
       planRef.current = next;
       setPlan(next);
       savePlan(next);
       const readings = await loadReadings(next.gadgets);
       if (!aliveRef.current) return;
-      const enriched = await writeInsights(next.gadgets, readings);
+      const enriched = await writeInsights(next.gadgets, readings, ai);
       if (!aliveRef.current) return;
       if (enriched.every((gadget, index) => gadget === next.gadgets[index])) return;
       const updated = { ...next, gadgets: enriched };
@@ -163,18 +176,19 @@ export function Dashboard() {
         return;
       }
 
+      const ai = createAiTrace();
       const list = await loadTools();
       const saved = loadPlan();
       if (planFits(saved, list)) {
-        await applyPlan(saved);
+        await applyPlan(saved, ai);
         return;
       }
 
       setDesigning(true);
-      const designed = await designDashboard(list);
+      const designed = await designDashboard(list, ai);
       setDesigning(false);
       if (!aliveRef.current) return;
-      await applyPlan(designed ?? fallbackPlan(list));
+      await applyPlan(designed ?? fallbackPlan(list), ai);
     } catch (error) {
       setDesigning(false);
       setPageError(error instanceof Error ? error.message : "Could not load Garmin data.");
@@ -187,7 +201,7 @@ export function Dashboard() {
         setUpdatedAt(Date.now());
       }
     }
-  }, [applyPlan, loadStatus, loadTools]);
+  }, [applyPlan, createAiTrace, loadStatus, loadTools]);
 
   useEffect(() => {
     void bootstrap();
@@ -199,7 +213,8 @@ export function Dashboard() {
     haptic("tap");
     setRefreshing(true);
     try {
-      await applyPlan(current);
+      await applyPlan(current, createAiTrace());
+      posthog.capture("dashboard_refreshed", { gadget_count: current.gadgets.length });
     } finally {
       if (aliveRef.current) {
         setRefreshing(false);
@@ -215,9 +230,15 @@ export function Dashboard() {
     setDesigning(true);
     setPageError(null);
     try {
-      const designed = await designDashboard(tools);
+      const ai = createAiTrace();
+      const designed = await designDashboard(tools, ai);
       if (!aliveRef.current) return;
-      await applyPlan(designed ?? fallbackPlan(tools));
+      const next = designed ?? fallbackPlan(tools);
+      await applyPlan(next, ai);
+      posthog.capture("dashboard_redesigned", {
+        gadget_count: next.gadgets.length,
+        layout_source: designed ? "ai" : "fallback",
+      });
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "Could not redesign the dashboard.");
     } finally {
@@ -231,7 +252,7 @@ export function Dashboard() {
   async function resetLayout() {
     if (tools.length === 0 || designing) return;
     haptic("select");
-    await applyPlan(fallbackPlan(tools));
+    await applyPlan(fallbackPlan(tools), createAiTrace());
     setUpdatedAt(Date.now());
   }
 
@@ -281,6 +302,7 @@ export function Dashboard() {
         configured={status?.configured ?? true}
         onMcp={() => {
           setConnectOpen(false);
+          posthog.capture("garmin_connection_started", { connection_method: "mcp" });
           window.location.assign("/api/garmin/connect");
         }}
         onConnected={() => {

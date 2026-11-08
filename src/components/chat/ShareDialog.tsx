@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { usePostHog } from "posthog-js/react";
 import { Check, Copy, Link2, Mail, MessageCircle, Share2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,6 +18,7 @@ export function ShareDialog({
   /** Address of the open chat; falls back to the app root. */
   url?: string;
 }) {
+  const posthog = usePostHog();
   const [link, setLink] = useState("");
   const [copied, setCopied] = useState(false);
   const canNativeShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
@@ -33,6 +35,7 @@ export function ShareDialog({
     try {
       await navigator.clipboard.writeText(link);
       haptic("done");
+      posthog.capture("chat_share_link_copied", { shared_chat: Boolean(url) });
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch {

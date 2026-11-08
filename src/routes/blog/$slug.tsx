@@ -1,9 +1,10 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
-import { ArrowUpRight, MessageSquare } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { BlogShell } from "@/components/blog/BlogShell";
+import { NotFoundGlitch } from "@/components/NotFoundGlitch";
 import { JsonLd } from "@/components/seo/json-ld";
 import { formatPostDate, getBlogPost } from "@/lib/blog";
 import { SITE_NAME, siteUrl } from "@/lib/seo";
@@ -43,15 +44,13 @@ export const Route = createFileRoute("/blog/$slug")({
 function MissingPost() {
   return (
     <BlogShell>
-      <h1 className="text-[28px] font-semibold tracking-tight">That post doesn&apos;t exist</h1>
-      <p className="mt-2 text-[14px] text-muted-foreground">The link may be old or mistyped.</p>
-      <a
-        href="/blog"
-        className="mt-6 inline-flex items-center gap-1.5 rounded-lg bg-foreground px-3.5 py-2 text-[12.5px] font-medium text-background"
-      >
-        Browse all posts
-        <ArrowUpRight className="size-3.5" />
-      </a>
+      <NotFoundGlitch
+        title="That post doesn’t exist"
+        description="The link may be old or mistyped."
+        homeLabel="Go to chat"
+        browseHref="/blog"
+        browseLabel="Browse all posts"
+      />
     </BlogShell>
   );
 }

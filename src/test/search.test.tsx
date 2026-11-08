@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { SearchDialog } from "@/components/chat/SearchDialog";
 import type { Chat } from "@/lib/chat";
+import type { BlogPost } from "@/lib/blog";
 
 const now = Date.now();
 const chats: Chat[] = [
@@ -21,6 +22,20 @@ const chats: Chat[] = [
     messages: [
       { id: "m2", role: "assistant", content: "Your long run was steady at 5:10/km.", steps: [] },
     ],
+  },
+];
+
+const blogs: BlogPost[] = [
+  {
+    slug: "body-battery",
+    title: "Garmin Body Battery explained",
+    description: "Understand energy reserve estimates.",
+    date: "2026-11-08",
+    author: "Garmin Chat",
+    keywords: ["recovery", "body battery"],
+    faq: [],
+    readingMinutes: 3,
+    body: "Garmin calculates an estimate using sleep and stress.",
   },
 ];
 
@@ -50,7 +65,19 @@ describe("SearchDialog", () => {
     expect(screen.getByText("Sleep this week")).toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "cycling" } });
-    expect(screen.getByText(/No chats match/)).toBeInTheDocument();
+    expect(screen.getByText(/No site results match/)).toBeInTheDocument();
+  });
+
+  it("searches guide body and labels site results", () => {
+    render(
+      <SearchDialog open onOpenChange={vi.fn()} chats={[]} blogs={blogs} onSelect={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Search query"), { target: { value: "stress" } });
+
+    expect(screen.getByText("Garmin Body Battery explained")).toBeInTheDocument();
+    expect(screen.getByText("Guide")).toBeInTheDocument();
+    expect(screen.getByText(/calculates an estimate using sleep and stress/)).toBeInTheDocument();
   });
 
   it("opens the chosen chat and closes", () => {

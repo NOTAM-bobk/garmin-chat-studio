@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import {
+  Bell,
   Check,
   Cloud,
   Loader2,
@@ -45,6 +46,10 @@ export function SettingsDialog({
   onDisconnect,
   haptics,
   onHapticsChange,
+  notificationsEnabled,
+  onNotificationsChange,
+  notificationSupported,
+  notificationPermission,
   onHapticTest,
   chatCount,
   onClearChats,
@@ -72,6 +77,10 @@ export function SettingsDialog({
   onDisconnect: () => void;
   haptics: boolean;
   onHapticsChange: (value: boolean) => void;
+  notificationsEnabled: boolean;
+  onNotificationsChange: (value: boolean) => void;
+  notificationSupported: boolean;
+  notificationPermission: NotificationPermission | "unsupported";
   onHapticTest: (kind: HapticKind) => void;
   chatCount: number;
   onClearChats: () => void;
@@ -418,6 +427,32 @@ export function SettingsDialog({
                   </ul>
                 </>
               )}
+            </div>
+          </Section>
+
+          <Section title="Notifications" hint="Optional reply-ready alerts for this browser.">
+            <div className="flex items-start gap-3 rounded-xl border border-border bg-card/60 p-3">
+              <Bell className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <label htmlFor="notifications" className="block text-[13px] font-medium">
+                  Reply notifications
+                </label>
+                <p className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+                  {!notificationSupported
+                    ? "This browser does not support notifications."
+                    : notificationPermission === "denied"
+                      ? "Notifications are blocked by your browser. Change site permissions in browser settings to enable them."
+                      : "Ask permission, then show an alert when a reply finishes while this tab is in the background. The app cannot send alerts after it is closed or provide scheduled Garmin updates."}
+                </p>
+              </div>
+              <Switch
+                id="notifications"
+                checked={notificationsEnabled}
+                disabled={!notificationSupported || notificationPermission === "denied"}
+                onCheckedChange={onNotificationsChange}
+                aria-label="Reply notifications"
+                className="mt-0.5 shrink-0"
+              />
             </div>
           </Section>
 

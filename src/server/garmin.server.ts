@@ -484,7 +484,7 @@ async function initialize(token: string): Promise<string | null> {
     params: {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: {},
-      clientInfo: { name: "garmin-chat-studio", version: "1.0.0" },
+      clientInfo: { name: "garmin-chat-studio", version: "1.1.0" },
     },
   });
   if (reply.status === 401) {

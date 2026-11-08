@@ -4,6 +4,7 @@ import {
   AreaChart,
   Bar,
   BarChart,
+  Brush,
   CartesianGrid,
   Cell,
   Line,
@@ -193,12 +194,19 @@ export function ChatChart({ spec, bare = false }: { spec: ChartSpec; bare?: bool
   const axisProps = {
     tick: { fontSize: 11, fill: "var(--color-muted-foreground)" },
     tickLine: false,
-    axisLine: false,
+    axisLine: { stroke: "var(--color-border)" },
   } as const;
 
-  // Axis captions: the model can name them, otherwise the unit stands in for y.
-  const xLabel = spec.xLabel;
-  const yLabel = spec.yLabel ?? (spec.unit === "%" ? undefined : spec.unit);
+  // Keep both axes explicit even when the model omits captions.
+  const xLabel = spec.xLabel ?? "Date / period";
+  const leftSeries = spec.series.filter((series) => seriesAxis(series) === "left");
+  const rightSeries = spec.series.filter((series) => seriesAxis(series) === "right");
+  const yLabel =
+    spec.yLabel ??
+    spec.unit ??
+    (leftSeries.length === 1 ? (leftSeries[0]?.name ?? "Value") : "Value");
+  const rightLabel = rightSeries.length === 1 ? (rightSeries[0]?.name ?? "Value") : "Value";
+  const canBrush = spec.type !== "pie" && rows.length >= 10;
 
   const plot = (
     <>
@@ -207,46 +215,46 @@ export function ChatChart({ spec, bare = false }: { spec: ChartSpec; bare?: bool
         dataKey="label"
         interval="preserveStartEnd"
         minTickGap={18}
-        height={xLabel ? 34 : 24}
-        {...(xLabel
-          ? {
-              label: {
-                value: xLabel,
-                position: "insideBottom" as const,
-                offset: 0,
-                fontSize: AXIS_TEXT.fontSize,
-                fill: AXIS_TEXT.fill,
-              },
-            }
-          : {})}
+        height={36}
+        label={{
+          value: xLabel,
+          position: "insideBottom",
+          offset: 0,
+          fontSize: AXIS_TEXT.fontSize,
+          fill: AXIS_TEXT.fill,
+        }}
         {...axisProps}
       />
       <YAxis
         yAxisId="left"
-        width={yLabel ? 56 : 38}
+        width={58}
         domain={leftDomain}
         tickFormatter={formatChartValue}
-        {...(yLabel
-          ? {
-              label: {
-                value: yLabel,
-                angle: -90,
-                position: "insideLeft" as const,
-                offset: 6,
-                fontSize: AXIS_TEXT.fontSize,
-                fill: AXIS_TEXT.fill,
-              },
-            }
-          : {})}
+        label={{
+          value: yLabel,
+          angle: -90,
+          position: "insideLeft",
+          offset: 4,
+          fontSize: AXIS_TEXT.fontSize,
+          fill: AXIS_TEXT.fill,
+        }}
         {...axisProps}
       />
       {hasRightAxis && (
         <YAxis
           yAxisId="right"
           orientation="right"
-          width={38}
+          width={58}
           domain={rightDomain}
           tickFormatter={formatChartValue}
+          label={{
+            value: rightLabel,
+            angle: 90,
+            position: "insideRight",
+            offset: 4,
+            fontSize: AXIS_TEXT.fontSize,
+            fill: AXIS_TEXT.fill,
+          }}
           {...axisProps}
         />
       )}
@@ -293,14 +301,14 @@ export function ChatChart({ spec, bare = false }: { spec: ChartSpec; bare?: bool
   const chartHeight = bare
     ? spec.type === "pie"
       ? 190
-      : xLabel
-        ? 224
-        : 206
+      : canBrush
+        ? 258
+        : 236
     : spec.type === "pie"
       ? 220
-      : xLabel
-        ? 246
-        : 228;
+      : canBrush
+        ? 282
+        : 260;
 
   return (
     <figure
@@ -376,6 +384,16 @@ export function ChatChart({ spec, bare = false }: { spec: ChartSpec; bare?: bool
                 margin={{ top: 6, right: hasRightAxis ? 4 : 8, bottom: 0, left: 0 }}
               >
                 {plot}
+                {canBrush && (
+                  <Brush
+                    dataKey="label"
+                    height={20}
+                    travellerWidth={10}
+                    ariaLabel="Chart date range"
+                    stroke="var(--color-chart-1)"
+                    fill="var(--color-muted)"
+                  />
+                )}
                 {spec.series.map((series, index) =>
                   hidden.includes(`s${index}`) ? null : (
                     <Bar
@@ -397,6 +415,16 @@ export function ChatChart({ spec, bare = false }: { spec: ChartSpec; bare?: bool
                 margin={{ top: 6, right: hasRightAxis ? 4 : 8, bottom: 0, left: 0 }}
               >
                 {plot}
+                {canBrush && (
+                  <Brush
+                    dataKey="label"
+                    height={20}
+                    travellerWidth={10}
+                    ariaLabel="Chart date range"
+                    stroke="var(--color-chart-1)"
+                    fill="var(--color-muted)"
+                  />
+                )}
                 {spec.series.map((series, index) =>
                   hidden.includes(`s${index}`) ? null : (
                     <Area
@@ -421,6 +449,16 @@ export function ChatChart({ spec, bare = false }: { spec: ChartSpec; bare?: bool
                 margin={{ top: 6, right: hasRightAxis ? 4 : 8, bottom: 0, left: 0 }}
               >
                 {plot}
+                {canBrush && (
+                  <Brush
+                    dataKey="label"
+                    height={20}
+                    travellerWidth={10}
+                    ariaLabel="Chart date range"
+                    stroke="var(--color-chart-1)"
+                    fill="var(--color-muted)"
+                  />
+                )}
                 {spec.series.map((series, index) =>
                   hidden.includes(`s${index}`) ? null : (
                     <Line

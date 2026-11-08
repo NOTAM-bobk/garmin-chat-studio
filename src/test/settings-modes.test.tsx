@@ -9,6 +9,7 @@ type Overrides = {
   onCreateMode?: (name: string, instruction: string) => void;
   onDeleteMode?: (id: string) => void;
   onToneChange?: (tone: string) => void;
+  onNotificationsChange?: (enabled: boolean) => void;
 };
 
 function renderSettings(overrides: Overrides = {}) {
@@ -28,6 +29,10 @@ function renderSettings(overrides: Overrides = {}) {
       onDisconnect={vi.fn()}
       haptics
       onHapticsChange={vi.fn()}
+      notificationsEnabled={false}
+      onNotificationsChange={overrides.onNotificationsChange ?? vi.fn()}
+      notificationSupported
+      notificationPermission="default"
       onHapticTest={vi.fn()}
       chatCount={0}
       onClearChats={vi.fn()}
@@ -45,6 +50,18 @@ function renderSettings(overrides: Overrides = {}) {
 }
 
 describe("custom modes in settings", () => {
+  it("offers opt-in browser reply notifications", () => {
+    const onNotificationsChange = vi.fn();
+    renderSettings({ onNotificationsChange });
+
+    fireEvent.click(screen.getByRole("switch", { name: "Reply notifications" }));
+
+    expect(onNotificationsChange).toHaveBeenCalledWith(true);
+    expect(
+      screen.getByText(/cannot send alerts after it is closed or provide scheduled Garmin updates/),
+    ).toBeInTheDocument();
+  });
+
   it("saves a new mode from the form", () => {
     const onCreateMode = vi.fn();
     renderSettings({ onCreateMode });

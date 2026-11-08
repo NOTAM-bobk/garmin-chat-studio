@@ -28,6 +28,7 @@ import {
   Route,
   Search,
   Settings2,
+  Sunrise,
   Share2,
   Shuffle,
   Sparkles,
@@ -60,6 +61,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Toaster } from "@/components/ui/sonner";
 import { parseChartSpec } from "@/lib/chart";
+import { BLOG_POSTS } from "@/lib/blog";
 import {
   TOOL_CAP,
   coreTools,
@@ -161,6 +163,7 @@ import { ConnectDialog } from "@/components/chat/ConnectDialog";
 const TONE_KEY = "garmin-chat:tone";
 const MODEL_KEY = "garmin-chat:model";
 const ONBOARDED_KEY = "garmin-chat:onboarded:v1";
+const NOTIFICATIONS_KEY = "garmin-chat:notifications:v1";
 const FENCE = "```";
 
 const PRESETS = [
@@ -265,9 +268,10 @@ ${memoryPrompt(memories)}
 How to answer:
 - Ground every claim about the user in tool output or in the attached image. Never invent numbers, dates, activity names or workouts.
 - Plan the lookup: cheapest summary first, then drill into the one metric that changes the answer. Skip tools whose data cannot affect the reply.
-- Turn relative dates into explicit YYYY-MM-DD ranges ending today.
-- Compare against the user's own baseline (7 or 30 days), not population averages, and quote the delta with numbers.
-- Cross-check related signals (sleep, HRV, resting HR, load, readiness) before recommending a change. If two signals disagree, name the conflict and say which one you trust.
+- Turn relative dates into explicit YYYY-MM-DD ranges ending today. Check that returned dates cover the requested window; identify partial coverage and never treat missing readings as zero.
+- Compare like with like: same sport, comparable session type and duration, same units, and the user's own baseline (7 or 30 days), not population averages. Quote the delta only when the comparison is supported by returned data.
+- Cross-check related signals (sleep, HRV, resting HR, load, readiness) before recommending a change. If signals disagree, name the conflict and explain which evidence is more relevant to this question.
+- Distinguish Garmin's estimates and labels from direct measurements. Do not turn a single score, arbitrary threshold, or missing device metric into a diagnosis or certainty.
 - When data is thin or a tool fails, say exactly what is missing and what you can still conclude.
 - When the user asks for a diagnosis or a recommendation, commit: the most likely explanation and what you would do. Do not hedge across maybes.
 - ${writes}
@@ -399,6 +403,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
   const [account, setAccount] = useState<PuterAccount | null>(null);
   const [syncState, setSyncState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [haptics, setHaptics] = useState(true);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [renamingChat, setRenamingChat] = useState<Chat | null>(null);
   const [showJump, setShowJump] = useState(false);
   /** Garmin rejected the stored session; readings need a fresh sign-in. */
@@ -460,6 +465,15 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
     const savedModel = localStorage.getItem(MODEL_KEY);
     if (savedModel) setModel(savedModel);
     setHaptics(readHapticsSetting());
+    try {
+      const notificationsAllowed =
+        localStorage.getItem(NOTIFICATIONS_KEY) === "1" &&
+        "Notification" in window &&
+        Notification.permission === "granted";
+      setNotificationsEnabled(notificationsAllowed);
+    } catch {
+      setNotificationsEnabled(false);
+    }
     try {
       if (localStorage.getItem(ONBOARDED_KEY) !== "1") setWelcomeOpen(true);
     } catch {
@@ -809,6 +823,43 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
   function chooseHaptics(next: boolean) {
     setHaptics(next);
     writeHapticsSetting(next);
+  }
+
+  async function chooseNotifications(next: boolean) {
+    if (!next) {
+      setNotificationsEnabled(false);
+      try {
+        localStorage.setItem(NOTIFICATIONS_KEY, "0");
+      } catch {
+        // The in-memory setting still turns off for this session.
+      }
+      return;
+    }
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      toast.error("Notifications aren't supported in this browser");
+      return;
+    }
+    try {
+      const permission = await Notification.requestPermission();
+      const enabled = permission === "granted";
+      setNotificationsEnabled(enabled);
+      try {
+        localStorage.setItem(NOTIFICATIONS_KEY, enabled ? "1" : "0");
+      } catch {
+        // Permission remains active for this page even if storage is blocked.
+      }
+      if (enabled) {
+        toast.success("Notifications enabled", {
+          description: "You can be notified when a reply finishes in a background tab.",
+        });
+      } else {
+        toast("Notifications not enabled", {
+          description: "Allow notifications in your browser settings to turn them on.",
+        });
+      }
+    } catch {
+      toast.error("Couldn't request notification permission");
+    }
   }
 
   const closeWelcome = useCallback(() => {
@@ -1408,6 +1459,30 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
       abortRef.current = null;
     }
 
+    if (
+      notificationsEnabled &&
+      !controller.signal.aborted &&
+      streamed.trim() &&
+      !pendingAsk &&
+      typeof document !== "undefined" &&
+      document.visibilityState === "hidden" &&
+      "Notification" in window &&
+      Notification.permission === "granted"
+    ) {
+      try {
+        const notification = new Notification("Garmin Chat reply ready", {
+          body: "Your training chat reply is ready. Open Garmin Chat to view it.",
+          tag: `reply-${chatId}`,
+        });
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+      } catch {
+        // Browser notification APIs can still fail after permission is granted.
+      }
+    }
+
     // Offer the next two questions from the finished answer. Best effort: an
     // empty list simply renders nothing.
     if (!controller.signal.aborted && streamed.trim() && !pendingAsk) {
@@ -1701,6 +1776,14 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         onDisconnect={() => void disconnectGarmin()}
         haptics={haptics}
         onHapticsChange={chooseHaptics}
+        notificationsEnabled={notificationsEnabled}
+        onNotificationsChange={(next) => void chooseNotifications(next)}
+        notificationSupported={typeof window !== "undefined" && "Notification" in window}
+        notificationPermission={
+          typeof window !== "undefined" && "Notification" in window
+            ? Notification.permission
+            : "unsupported"
+        }
         onHapticTest={haptic}
         chatCount={chats.length}
         onClearChats={clearChats}
@@ -1725,6 +1808,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         open={searchOpen}
         onOpenChange={setSearchOpen}
         chats={chats}
+        blogs={BLOG_POSTS}
         onSelect={(id) => focusChat(id)}
       />
 
@@ -1776,11 +1860,16 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
             />
           </div>
           <button
-            onClick={newChat}
-            aria-label="New chat"
+            type="button"
+            onClick={() => {
+              haptic("tap");
+              setSearchOpen(true);
+            }}
+            aria-label="Search this site"
+            title="Search this site"
             className="grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
           >
-            <SquarePen className="size-[18px]" />
+            <Search className="size-[18px]" />
           </button>
         </div>
 
@@ -1796,6 +1885,17 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
           >
             <span className="relative">Get unlimited access</span>
           </a>
+        </div>
+
+        <div className="px-2 pb-2">
+          <button
+            type="button"
+            onClick={newChat}
+            className="flex h-9 w-full items-center gap-2 rounded-lg border border-sidebar-border px-2 text-left text-[13px] text-sidebar-foreground transition-colors hover:bg-sidebar-accent"
+          >
+            <SquarePen className="size-4 text-muted-foreground" />
+            New Chat
+          </button>
         </div>
 
         <div className="px-2 pb-2">
@@ -1816,6 +1916,17 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
               {label}
             </a>
           ))}
+          <button
+            type="button"
+            disabled
+            aria-label="Morning report — not built yet"
+            title="Morning report — not built yet"
+            className="flex w-full cursor-not-allowed items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] text-muted-foreground/60"
+          >
+            <Sunrise className="size-4" />
+            Morning report
+            <span className="ml-auto text-[10px]">Not built yet</span>
+          </button>
           <p className="px-2 py-1 text-[12px] text-muted-foreground/70">More coming soon</p>
         </div>
 
@@ -1876,7 +1987,7 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
         </div>
 
         <div className="border-t border-sidebar-border/80 p-2">
-          {connected ? (
+          {connected && (
             <div className="group flex items-center gap-2 rounded-lg px-2 py-1.5">
               <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
               <span className="min-w-0 flex-1 truncate text-[12.5px]">Garmin connected</span>
@@ -1889,11 +2000,6 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
                 <Unplug className="size-3.5" />
               </button>
             </div>
-          ) : (
-            <GlowButton fullWidth onClick={openConnect} size="sm" className="mt-0.5">
-              <Plug className="size-3.5" />
-              Connect Garmin
-            </GlowButton>
           )}
 
           <div className="mt-1 flex gap-0.5 overflow-x-auto border-t border-sidebar-border/60 pt-1 [scrollbar-width:none] md:block md:space-y-0.5">
@@ -1918,17 +2024,6 @@ export function ChatApp({ initialChatId = null }: { initialChatId?: string | nul
             >
               <Settings2 className="size-3.5" />
               Settings
-            </button>
-            <button
-              onClick={() => {
-                haptic("tap");
-                setSearchOpen(true);
-                setMobileSidebar(false);
-              }}
-              className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 md:w-full md:gap-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
-            >
-              <Search className="size-3.5" />
-              Search
             </button>
             <button
               onClick={() => setWelcomeOpen(true)}

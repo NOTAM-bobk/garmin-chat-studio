@@ -1,7 +1,39 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("recharts", () => {
+  const Chart = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
+  const Axis = ({ label }: { label?: { value?: string } }) => <span>{label?.value}</span>;
+  const Brush = ({ ariaLabel }: { ariaLabel?: string }) => (
+    <>
+      <button role="slider" aria-label={ariaLabel} />
+      <button role="slider" aria-label={ariaLabel} />
+    </>
+  );
+  return {
+    Area: () => null,
+    AreaChart: Chart,
+    Bar: () => null,
+    BarChart: Chart,
+    Brush,
+    CartesianGrid: () => null,
+    Cell: () => null,
+    Line: () => null,
+    LineChart: Chart,
+    Pie: () => null,
+    PieChart: Chart,
+    ReferenceLine: () => null,
+    ResponsiveContainer: Chart,
+    Tooltip: () => null,
+    XAxis: Axis,
+    YAxis: Axis,
+  };
+});
 
 import { ChatApp } from "@/components/chat/ChatApp";
+import { ChatChart } from "@/components/chat/ChatChart";
+import type { ChartSpec } from "@/lib/chart";
 
 beforeEach(() => {
   localStorage.clear();
@@ -44,6 +76,22 @@ beforeEach(() => {
 });
 
 describe("chart blocks", () => {
+  it("labels both axes and makes longer trends range-selectable", async () => {
+    const spec: ChartSpec = {
+      type: "line",
+      title: "Two-week trend",
+      x: Array.from({ length: 12 }, (_, index) => `Day ${index + 1}`),
+      xLabel: "Day",
+      yLabel: "HRV (ms)",
+      series: [{ name: "HRV", data: [40, 42, 39, 44, 45, 43, 46, 48, 47, 49, 50, 52] }],
+    };
+    render(<ChatChart spec={spec} />);
+
+    expect(await screen.findByText("Day")).toBeInTheDocument();
+    expect(screen.getByText("HRV (ms)")).toBeInTheDocument();
+    expect(screen.getAllByRole("slider", { name: "Chart date range" })).toHaveLength(2);
+  });
+
   it("renders a chart instead of raw JSON", async () => {
     render(<ChatApp />);
     fireEvent.click(await screen.findByText("Sleep trend"));

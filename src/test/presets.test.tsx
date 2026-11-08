@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatApp } from "@/components/chat/ChatApp";
@@ -54,16 +54,22 @@ describe("empty-state presets", () => {
     expect(window.location.pathname).toBe("/");
   });
 
-  it("opens search and uses the panel icon and glow connect button", async () => {
+  it("keeps one Garmin connect button outside the sidebar", async () => {
     render(<ChatApp />);
 
-    expect(await screen.findByRole("button", { name: "Search" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Search this site" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New Chat" })).toBeInTheDocument();
     expect(document.querySelector(".lucide-panel-left")).toBeTruthy();
 
-    const connect = screen.getAllByRole("button", { name: /Connect Garmin/ });
-    expect(connect.some((button) => button.className.includes("bg-[#0d0d0f]"))).toBe(true);
+    const apps = screen.getByText("Apps").parentElement!;
+    expect(within(apps).getByRole("link", { name: "Workout calendar" })).toBeInTheDocument();
+    expect(within(apps).getByRole("button", { name: /Morning report/ })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    const connect = screen.getAllByRole("button", { name: /Connect Garmin/ });
+    expect(connect).toHaveLength(1);
+    expect(connect[0]!.className).toContain("bg-[#0d0d0f]");
+
+    fireEvent.click(screen.getByRole("button", { name: "Search this site" }));
     expect(await screen.findByLabelText("Search query")).toBeInTheDocument();
   });
 
@@ -74,6 +80,6 @@ describe("empty-state presets", () => {
     expect(upgrade.getAttribute("href")).toBe("/upgrade");
     expect(screen.getByRole("button", { name: "Share" })).toBeInTheDocument();
     expect(screen.getByText(/Built by Sawyer Schulz/)).toBeInTheDocument();
-    expect(screen.getByText(/v1\.0\.0/)).toBeInTheDocument();
+    expect(screen.getByText(/v1\.1\.0/)).toBeInTheDocument();
   });
 });
